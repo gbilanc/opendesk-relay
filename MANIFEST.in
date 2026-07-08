@@ -1,0 +1,7 @@
+include relay-config.yaml
+include deploy/opendesk-relay.service
+include deploy/opendesk-relay.default
+include deploy/opendesk-relay.logrotate
+include Makefile
+include install-relay.sh
+include restart-relay.sh

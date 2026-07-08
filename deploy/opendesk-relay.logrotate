@@ -1,0 +1,28 @@
+#
+# /etc/logrotate.d/opendesk-relay
+#
+# Rotate logs for the OpenDesk Relay Server.
+#
+# The relay server performs its own internal rotation (RotatingFileHandler),
+# but this logrotate config provides an additional layer for logs written
+# directly to /var/log/opendesk-relay/ by external redirect.
+#
+
+/var/log/opendesk-relay/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    dateext
+    dateformat -%Y-%m-%d
+    maxsize 100M
+    sharedscripts
+    postrotate
+        # The relay server handles its own log files internally,
+        # but if you use external redirect, uncomment the next line:
+        # systemctl kill -s USR1 opendesk-relay 2>/dev/null || true
+    endscript
+}

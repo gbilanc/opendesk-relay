@@ -3,8 +3,8 @@
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
-COPY pyproject.toml README.md ./
-COPY relay_server/ ./relay_server/
+COPY pyproject.toml README.md MANIFEST.in ./
+COPY src/ ./src/
 
 RUN pip install --no-cache-dir build && \
     python -m build --wheel

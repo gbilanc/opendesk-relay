@@ -1,0 +1,36 @@
+[Unit]
+Description=OpenDesk Relay Server
+Documentation=https://github.com/opendesk/opendesk-relay
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# The relay-server binary is installed by pip as a console_scripts entry point.
+# Its full path depends on the Python environment; we use the environment
+# variable set in /etc/default/opendesk-relay so you can customise it.
+EnvironmentFile=-/etc/default/opendesk-relay
+ExecStart=relay-server --config /etc/opendesk-relay/relay-config.yaml
+
+# If you prefer an absolute path, find it with:
+#   which relay-server
+# and replace the line above with e.g.:
+#   ExecStart=/usr/local/bin/relay-server --config /etc/opendesk-relay/relay-config.yaml
+
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/opendesk-relay /var/log/opendesk-relay
+
+# User & group (created at install time)
+User=opendesk-relay
+Group=opendesk-relay
+
+[Install]
+WantedBy=multi-user.target

@@ -17,11 +17,97 @@ Standalone TCP relay server for [OpenDesk](https://github.com/opendesk/opendesk)
 ## Quick start
 
 ```bash
-# From the opendesk project root
-uv run opendesk-relay
+# Install with pip
+pip install opendesk-relay-server
 
-# Or directly
-uv run python -m relay_server --port 8474
+# Run directly
+relay-server --port 8474
+
+# Or with uv (from source)
+uv run relay-server --port 8474
+
+# Or via Python module
+python -m relay_server --port 8474
+```
+
+## Linux Installation (systemd)
+
+For a production Linux server, use the provided installer or Makefile.
+
+### Option 1 — Makefile (recommended)
+
+```bash
+# Build wheel and install as root
+sudo make install
+
+# Custom prefix
+sudo make install PREFIX=/opt/opendesk
+```
+
+### Option 2 — Install script
+
+```bash
+# Run as root
+sudo ./install-relay.sh
+
+# Custom port
+sudo ./install-relay.sh --port 9443
+
+# Custom prefix
+sudo ./install-relay.sh --prefix /opt/opendesk
+```
+
+### What gets installed
+
+| Path | Purpose |
+|---|---|
+| `relay-server` (in `$PREFIX/bin`) | CLI binary (pip entry point) |
+| `/etc/opendesk-relay/relay-config.yaml` | YAML configuration |
+| `/etc/default/opendesk-relay` | Environment variable overrides |
+| `/etc/systemd/system/opendesk-relay.service` | Systemd unit |
+| `/etc/logrotate.d/opendesk-relay` | Log rotation |
+| `/var/log/opendesk-relay/` | Log files |
+| `/var/lib/opendesk-relay/` | Data directory |
+
+The service runs under a dedicated `opendesk-relay` system user.
+
+### Manage the service
+
+```bash
+sudo systemctl enable --now opendesk-relay   # Start on boot
+sudo systemctl status opendesk-relay          # Check status
+sudo journalctl -u opendesk-relay -f          # Follow logs
+sudo systemctl restart opendesk-relay         # Restart
+```
+
+### Uninstall
+
+```bash
+sudo make uninstall
+```
+
+### Makefile targets
+
+| Target | Description |
+|---|---|
+| `make build` | Build pip wheel in `dist/` |
+| `make install` | Install wheel + system files (as root) |
+| `make uninstall` | Remove all installed files |
+| `make reinstall` | Uninstall + install |
+| `make clean` | Remove build artifacts |
+| `make dist` | Build wheel + distribution tarball |
+| `make test` | Run tests |
+| `make lint` | Run ruff + mypy |
+
+## Docker
+
+```bash
+# Build and run
+docker compose up -d
+
+# Or build manually
+docker build -t opendesk-relay .
+docker run -d -p 8474:8474 -p 8484:8484 opendesk-relay
 ```
 
 ## Configuration
@@ -59,7 +145,7 @@ relay:
 logging:
   level: "INFO"
   format: "text"       # or "json"
-  file: "/var/log/opendesk-relay.log"
+  file: "/var/log/opendesk-relay/relay.log"
 ```
 
 ### Environment variables
@@ -131,18 +217,6 @@ Metrics available at `GET /metrics` (Prometheus text format).
 | `GET /health/ready` | Readiness probe |
 | `GET /health/live` | Liveness probe |
 
-## Docker
-
-```bash
-# Build and run
-cd relay_server
-docker compose up -d
-
-# Or build manually
-docker build -t opendesk-relay .
-docker run -d -p 8474:8474 -p 8484:8484 opendesk-relay
-```
-
 ## Development
 
 ```bash
@@ -150,38 +224,50 @@ docker run -d -p 8474:8474 -p 8484:8484 opendesk-relay
 uv sync
 
 # Run tests
-uv run pytest relay_server/tests/ -v
+make test
 
 # Format code
-uv run black relay_server/
+make lint
 
-# Type check
-uv run mypy relay_server/
+# Build wheel
+make build
+
+# Build distribution tarball
+make dist
 ```
 
-## Architecture
+## Project structure
 
 ```
-relay_server/
-├── pyproject.toml          # Project configuration
+opendesk-relay/
+├── pyproject.toml              # Package metadata
+├── Makefile                    # Build & install targets
 ├── README.md
-├── relay-config.yaml       # Example config
-├── Dockerfile              # Multi-stage build
-├── docker-compose.yml      # Container orchestration
-├── relay_server/           # Python package
-│   ├── __init__.py         # Package init
-│   ├── __main__.py         # Entry point
-│   ├── server.py           # Core relay server
-│   ├── protocol.py         # Message protocol (extracted)
-│   ├── auth.py             # Authentication (extracted)
-│   ├── config.py           # Configuration management
-│   ├── web/
-│   │   ├── app.py          # FastAPI web server
-│   │   ├── api.py          # REST API endpoints
-│   │   └── static/         # Dashboard UI
-│   └── monitoring/
-│       ├── metrics.py      # Prometheus metrics
-└── tests/                  # Test suite
+├── MANIFEST.in
+├── relay-config.yaml           # Example configuration
+├── install-relay.sh            # Linux systemd installer
+├── restart-relay.sh            # Restart helper
+├── Dockerfile                  # Multi-stage Docker build
+├── docker-compose.yml          # Docker Compose
+├── deploy/
+│   ├── opendesk-relay.service  # Systemd unit template
+│   ├── opendesk-relay.default  # Default environment vars
+│   └── opendesk-relay.logrotate  # Logrotate config
+├── src/
+│   └── relay_server/           # Python package
+│       ├── __init__.py
+│       ├── __main__.py         # Entry point
+│       ├── server.py           # Core relay server
+│       ├── protocol.py         # Message protocol
+│       ├── auth.py             # Authentication
+│       ├── config.py           # Configuration management
+│       ├── web/
+│       │   ├── app.py          # FastAPI web server
+│       │   ├── api.py          # REST API endpoints
+│       │   └── static/         # Dashboard UI
+│       └── monitoring/
+│           └── metrics.py      # Prometheus metrics
+└── tests/                      # Test suite
     ├── test_protocol.py
     ├── test_auth.py
     ├── test_config.py

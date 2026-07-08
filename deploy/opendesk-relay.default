@@ -1,0 +1,40 @@
+#
+# /etc/default/opendesk-relay
+#
+# Environment variables for the OpenDesk Relay Server.
+# These are sourced by the systemd service.
+#
+# Each variable overrides the corresponding YAML config key.
+# See relay-config.yaml for the full list of options.
+#
+
+# Relay server
+# RELAY_HOST=0.0.0.0
+# RELAY_PORT=8474
+# RELAY_TLS_CERT=
+# RELAY_TLS_KEY=
+
+# Web dashboard
+# RELAY_ADMIN_ENABLED=true
+# RELAY_ADMIN_HOST=127.0.0.1
+# RELAY_ADMIN_PORT=8484
+# RELAY_ADMIN_USERNAME=admin
+# RELAY_ADMIN_PASSWORD_HASH=
+# RELAY_API_TOKEN=
+
+# Access control
+# RELAY_AUTH_ENABLED=true
+# RELAY_WHITELIST_IPS=
+# RELAY_BLACKLIST_IPS=
+
+# Relay behaviour
+# RELAY_PING_INTERVAL=30
+# RELAY_PEER_TIMEOUT=120
+# RELAY_MAX_MSG_SIZE=104857600
+
+# Logging
+# RELAY_LOG_LEVEL=INFO
+# RELAY_LOG_FILE=/var/log/opendesk-relay/relay.log
+# RELAY_LOG_FORMAT=json
+# RELAY_LOG_MAX_SIZE=52428800
+# RELAY_LOG_BACKUP_COUNT=5
