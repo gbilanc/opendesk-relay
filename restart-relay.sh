@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # restart-relay.sh — Restart the OpenDesk Relay Server
 #
@@ -12,7 +12,12 @@
 #   ./restart-relay.sh --help       # show help
 #
 
-set -euo pipefail
+# bash-only options (skip if running under sh/dash)
+if [ -n "${BASH_VERSION:-}" ]; then
+    set -euo pipefail
+else
+    set -eu
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVICE_NAME="opendesk-relay"

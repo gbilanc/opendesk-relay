@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # install-relay.sh — Install OpenDesk Relay Server on Linux
 #
@@ -17,7 +17,12 @@
 #   sudo make install
 #
 
-set -euo pipefail
+# bash-only options (skip if running under sh/dash)
+if [ -n "${BASH_VERSION:-}" ]; then
+    set -euo pipefail
+else
+    set -eu
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Defaults
