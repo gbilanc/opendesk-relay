@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import logging
 import sys
 
@@ -78,17 +79,17 @@ def main(argv: list[str] | None = None) -> None:
     # CLI overrides
     overrides = {}
     if args.host is not None:
-        overrides["server"] = {**config.server, "host": args.host}
+        overrides["server"] = {**dataclasses.asdict(config.server), "host": args.host}
     if args.port is not None:
-        overrides["server"] = {**config.server, "port": args.port}
+        overrides["server"] = {**dataclasses.asdict(config.server), "port": args.port}
     if args.admin_host is not None:
-        overrides["admin"] = {**config.admin, "web_host": args.admin_host}
+        overrides["admin"] = {**dataclasses.asdict(config.admin), "web_host": args.admin_host}
     if args.admin_port is not None:
-        overrides["admin"] = {**config.admin, "web_port": args.admin_port}
+        overrides["admin"] = {**dataclasses.asdict(config.admin), "web_port": args.admin_port}
     if args.no_admin is True:
-        overrides["admin"] = {**config.admin, "enabled": False}
+        overrides["admin"] = {**dataclasses.asdict(config.admin), "enabled": False}
     if args.debug is True:
-        overrides["logging"] = {**config.logging, "level": "DEBUG"}
+        overrides["logging"] = {**dataclasses.asdict(config.logging), "level": "DEBUG"}
 
     if overrides:
         config = config.merge(overrides)
