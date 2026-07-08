@@ -74,7 +74,7 @@ EOF
     exit 0
 }
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case "$1" in
         --prefix) PREFIX="$2"; shift 2 ;;
         --port) PORT="$2"; shift 2 ;;
@@ -91,28 +91,28 @@ BINDIR="${PREFIX}/bin"
 # ═══════════════════════════════════════════════════════════════════════════
 # Sanity checks
 # ═══════════════════════════════════════════════════════════════════════════
-if [[ $EUID -ne 0 ]]; then
+if [ "$(id -u)" -ne 0 ]; then
     echo "❌ This script must be run as root (use sudo)."
     exit 1
 fi
 
-if ! command -v systemctl &>/dev/null; then
+if ! command -v systemctl /dev/null 2>&1; then
     echo "❌ systemd not found — this script is for Linux with systemd only."
     echo "   On other platforms run: relay-server --port ${PORT}"
     exit 1
 fi
 
-if ! command -v "$PYTHON" &>/dev/null; then
+if ! command -v "$PYTHON" /dev/null 2>&1; then
     echo "❌ Python interpreter not found: ${PYTHON}"
     exit 1
 fi
 
-if ! command -v "$PIP" &>/dev/null && ! "$PYTHON" -m pip --version &>/dev/null; then
+if ! command -v "$PIP" /dev/null 2>&1 && ! "$PYTHON" -m pip --version /dev/null 2>&1; then
     echo "❌ pip not found. Install it with: ${PYTHON} -m ensurepip --upgrade"
     exit 1
 fi
 PIP_CMD="${PIP}"
-if ! command -v "$PIP_CMD" &>/dev/null; then
+if ! command -v "$PIP_CMD" /dev/null 2>&1; then
     PIP_CMD="${PYTHON} -m pip"
 fi
 
@@ -132,14 +132,14 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 echo "── Step 1/7: Creating system user ──"
 
-if getent group "$GROUPNAME" &>/dev/null; then
+if getent group "$GROUPNAME" /dev/null 2>&1; then
     echo "  ✓ Group '${GROUPNAME}' already exists"
 else
     groupadd --system "$GROUPNAME"
     echo "  ✓ Group '${GROUPNAME}' created"
 fi
 
-if getent passwd "$USERNAME" &>/dev/null; then
+if getent passwd "$USERNAME" /dev/null 2>&1; then
     echo "  ✓ User '${USERNAME}' already exists"
 else
     useradd --system \

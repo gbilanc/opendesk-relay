@@ -26,7 +26,7 @@ PORT="${PORT:-8474}"
 LOG_DIR="${LOG_DIR:-/var/log/opendesk-relay}"
 
 # Parse args
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="$2"; shift 2 ;;
         --help|-h)
