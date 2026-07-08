@@ -1,12 +1,14 @@
 #!/bin/bash
 #
-# install-relay.sh — Install OpenDesk Relay Server on Linux
+# install-relay.sh — Install OpenDesk Relay Server on Linux (via uv)
 #
 # This script installs the relay server as a systemd service with:
 #   - Dedicated system user (opendesk-relay)
 #   - YAML config in /etc/opendesk-relay/
 #   - Log rotation in /etc/logrotate.d/
 #   - Default environment in /etc/default/
+#
+# Build & install is done via uv (no pip required).
 #
 # Usage:
 #   sudo ./install-relay.sh                 # install from local source
@@ -32,7 +34,6 @@ NAME="opendesk-relay-server"
 SERVICE_NAME="opendesk-relay"
 
 PREFIX="${PREFIX:-/usr/local}"
-SYSCONFDIR="${SYSCONFDIR:-/etc}"
 BINDIR="${PREFIX}/bin"
 SYSTEMD_DIR="/etc/systemd/system"
 DEFAULT_DIR="/etc/default"
@@ -41,8 +42,7 @@ RELAY_CONF_DIR="/etc/opendesk-relay"
 RELAY_LOG_DIR="/var/log/opendesk-relay"
 RELAY_DATA_DIR="/var/lib/opendesk-relay"
 
-PYTHON="${PYTHON:-python3}"
-PIP="${PIP:-pip3}"
+UV="${UV:-uv}"
 PORT="${PORT:-8474}"
 USERNAME="opendesk-relay"
 GROUPNAME="opendesk-relay"
@@ -59,12 +59,12 @@ Install OpenDesk Relay Server as a systemd service.
 Options:
   --prefix DIR     Install prefix (default: ${PREFIX})
   --port PORT      Relay TCP port (default: ${PORT})
-  --python CMD     Python interpreter (default: ${PYTHON})
+  --uv PATH        uv executable (default: ${UV})
   --user USER      System user for the service (default: ${USERNAME})
   --help           Show this message
 
 Environment variables:
-  PREFIX, PORT, PYTHON — same as the corresponding flags.
+  PREFIX, PORT, UV — same as the corresponding flags.
 
 Examples:
   sudo $0                          # standard install
@@ -78,15 +78,12 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --prefix) PREFIX="$2"; shift 2 ;;
         --port) PORT="$2"; shift 2 ;;
-        --python) PYTHON="$2"; shift 2 ;;
+        --uv) UV="$2"; shift 2 ;;
         --user) USERNAME="$2"; GROUPNAME="$2"; shift 2 ;;
         --help|-h) usage ;;
         *) echo "❌ Unknown option: $1"; usage ;;
     esac
 done
-
-# Recalculate BINDIR after possible --prefix override
-BINDIR="${PREFIX}/bin"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Sanity checks
@@ -96,32 +93,24 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-if ! command -v systemctl /dev/null 2>&1; then
+if ! command -v systemctl >/dev/null 2>&1; then
     echo "❌ systemd not found — this script is for Linux with systemd only."
     echo "   On other platforms run: relay-server --port ${PORT}"
     exit 1
 fi
 
-if ! command -v "$PYTHON" /dev/null 2>&1; then
-    echo "❌ Python interpreter not found: ${PYTHON}"
+if ! command -v "$UV" >/dev/null 2>&1; then
+    echo "❌ uv not found at '${UV}'."
+    echo "   Install it with: curl -LsSf https://astral.sh/uv/install.sh | sh"
     exit 1
-fi
-
-if ! command -v "$PIP" /dev/null 2>&1 && ! "$PYTHON" -m pip --version /dev/null 2>&1; then
-    echo "❌ pip not found. Install it with: ${PYTHON} -m ensurepip --upgrade"
-    exit 1
-fi
-PIP_CMD="${PIP}"
-if ! command -v "$PIP_CMD" /dev/null 2>&1; then
-    PIP_CMD="${PYTHON} -m pip"
 fi
 
 echo ""
 echo "═══════════════════════════════════════════"
-echo " OpenDesk Relay Server — Installer"
+echo " OpenDesk Relay Server — Installer (uv)"
 echo "═══════════════════════════════════════════"
 echo " Source dir  : ${SCRIPT_DIR}"
-echo " Python      : ${PYTHON}"
+echo " uv          : ${UV}"
 echo " Prefix      : ${PREFIX}"
 echo " Port        : ${PORT}"
 echo " User        : ${USERNAME}"
@@ -132,14 +121,14 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 echo "── Step 1/7: Creating system user ──"
 
-if getent group "$GROUPNAME" /dev/null 2>&1; then
+if getent group "$GROUPNAME" >/dev/null 2>&1; then
     echo "  ✓ Group '${GROUPNAME}' already exists"
 else
     groupadd --system "$GROUPNAME"
     echo "  ✓ Group '${GROUPNAME}' created"
 fi
 
-if getent passwd "$USERNAME" /dev/null 2>&1; then
+if getent passwd "$USERNAME" >/dev/null 2>&1; then
     echo "  ✓ User '${USERNAME}' already exists"
 else
     useradd --system \
@@ -155,15 +144,17 @@ fi
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. Install Python package
+# 2. Build & install Python package with uv
 # ═══════════════════════════════════════════════════════════════════════════
-echo "── Step 2/7: Installing Python package ──"
+echo "── Step 2/7: Building & installing Python package ──"
 
 cd "$SCRIPT_DIR"
-$PYTHON -m build --wheel --no-isolation 2>/dev/null || $PYTHON -m build --wheel
-$PIP_CMD install --no-cache-dir dist/*.whl
+echo "  → Building wheel..."
+"$UV" build --wheel
+echo "  → Installing wheel into system Python..."
+"$UV" pip install --system dist/*.whl
 
-echo "  ✓ Python package installed"
+echo "  ✓ Python package installed via uv"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -206,7 +197,7 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 echo "── Step 5/7: Installing systemd service ──"
 
-# Determine the absolute path of relay-server
+# Determine the absolute path of relay-server (installed by uv pip)
 RELAY_BIN="$(command -v relay-server 2>/dev/null || echo "${BINDIR}/relay-server")"
 
 # Build the service file with correct paths
@@ -274,7 +265,7 @@ echo "     sudo systemctl disable ${SERVICE_NAME}"
 echo "     sudo rm -f ${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 echo "     sudo rm -f ${DEFAULT_DIR}/${SERVICE_NAME}"
 echo "     sudo rm -f ${LOGROTATE_DIR}/${SERVICE_NAME}"
-echo "     sudo ${PIP_CMD} uninstall -y ${NAME}"
+echo "     sudo uv pip uninstall --system ${NAME}"
 echo "     sudo userdel ${USERNAME}"
 echo "     sudo groupdel ${GROUPNAME}"
 echo ""

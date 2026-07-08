@@ -62,9 +62,13 @@ build:
 install: build
 	@printf "$(BLUE)► Installing $(NAME) v$(VERSION)...$(NC)\n\n"
 
-# 1. Install the Python wheel
+# 1. Install the Python wheel (prefer uv, fallback to pip)
 	@printf "  → Installing Python package...\n"
-	$(PIP) install --no-cache-dir $(BUILD_DIR)/*.whl
+	@if command -v uv >/dev/null 2>&1; then \
+		uv pip install --system $(BUILD_DIR)/*.whl; \
+	else \
+		$(PIP) install --no-cache-dir $(BUILD_DIR)/*.whl; \
+	fi
 	@printf "  $(GREEN)✔$(NC) Python package installed\n\n"
 
 # 2. Create directories
@@ -147,8 +151,12 @@ uninstall:
 # 4. Remove log dir (keep data)
 	@rmdir "$(RELAY_LOG_DIR)" 2>/dev/null || true
 
-# 5. Uninstall Python package
-	@$(PIP) uninstall -y "$(NAME)" 2>/dev/null || true
+# 5. Uninstall Python package (prefer uv, fallback to pip)
+	@if command -v uv >/dev/null 2>&1; then \
+		uv pip uninstall --system -y "$(NAME)" 2>/dev/null || true; \
+	else \
+		$(PIP) uninstall -y "$(NAME)" 2>/dev/null || true; \
+	fi
 	@printf "  $(GREEN)✔$(NC) Python package removed\n\n"
 
 # 6. Reload systemd
