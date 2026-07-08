@@ -1,0 +1,30 @@
+[Unit]
+Description=OpenDesk Relay Server
+Documentation=https://github.com/opendesk/opendesk-relay
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# === Path — il relay server è ora standalone in ../opendesk-relay ===
+# With uv:
+ExecStart=/home/giampaolo/.local/bin/uv run --directory /home/giampaolo/Codium/opendesk-relay relay-server --port 8474
+# With pip (alternative):
+# ExecStart=/usr/bin/python3 -m relay_server --port 8474
+
+# === Configuration ===
+Restart=on-failure
+RestartSec=5
+User=giampaolo
+Group=giampaolo
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/home/giampaolo/.opendesk
+
+[Install]
+WantedBy=multi-user.target

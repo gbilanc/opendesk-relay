@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  relay:
+    build: .
+    container_name: opendesk-relay
+    restart: unless-stopped
+    ports:
+      - "8474:8474"       # Relay TCP
+      - "8484:8484"       # Dashboard (optional)
+    environment:
+      - RELAY_PORT=8474
+      - RELAY_ADMIN_ENABLED=true
+      - RELAY_ADMIN_HOST=0.0.0.0   # Allow external dashboard access
+      - RELAY_ADMIN_PORT=8484
+      - RELAY_LOG_LEVEL=INFO
+      - RELAY_LOG_FORMAT=json
+      # - RELAY_ADMIN_PASSWORD_HASH=<argon2id-hash>   # Set for auth
+      # - RELAY_API_TOKEN=<your-token>                 # Set for API access
+      # - RELAY_WHITELIST_IPS=10.0.0.0/8,192.168.0.0/16
+    volumes:
+      - relay-data:/home/relay/.opendesk
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8484/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  relay-data:

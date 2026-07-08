@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opendesk-relay-server"
+version = "0.2.0"
+description = "Standalone relay server for OpenDesk — TCP fallback connectivity with web dashboard"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "OpenDesk Contributors"},
+]
+requires-python = ">=3.12"
+dependencies = [
+    "msgpack>=1.0.0",
+    "argon2-cffi>=23.1.0",
+    "PyNaCl>=1.5.0",
+    "PyYAML>=6.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "prometheus-client>=0.19.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "black>=24.0",
+    "ruff>=0.3.0",
+    "mypy>=1.9.0",
+    "httpx>=0.26.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["relay_server*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "*.css", "*.js", "*.yaml", "*.yml"]
+
+[project.scripts]
+relay-server = "relay_server.__main__:main"
+
+[tool.black]
+line-length = 99
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenDesk Relay Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <h1>🔁 OpenDesk Relay</h1>
+            <span class="version" id="version">v0.0.0</span>
+        </div>
+        <div class="header-right">
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot"></span>
+                <span class="status-text">Connected</span>
+            </div>
+            <span class="uptime" id="uptime">Uptime: --</span>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Summary cards -->
+        <section class="cards">
+            <div class="card card-peers">
+                <div class="card-icon">👥</div>
+                <div class="card-body">
+                    <span class="card-value" id="peerCount">0</span>
+                    <span class="card-label">Peers</span>
+                </div>
+            </div>
+            <div class="card card-sessions">
+                <div class="card-icon">🔗</div>
+                <div class="card-body">
+                    <span class="card-value" id="sessionCount">0</span>
+                    <span class="card-label">Sessions</span>
+                </div>
+            </div>
+            <div class="card card-devices">
+                <div class="card-icon">💻</div>
+                <div class="card-body">
+                    <span class="card-value" id="deviceCount">0</span>
+                    <span class="card-label">Devices</span>
+                </div>
+            </div>
+            <div class="card card-errors">
+                <div class="card-icon">⚠️</div>
+                <div class="card-body">
+                    <span class="card-value" id="errorCount">0</span>
+                    <span class="card-label">Errors</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tabs -->
+        <section class="tabs">
+            <nav class="tab-nav">
+                <button class="tab-btn active" data-tab="peers">Peers</button>
+                <button class="tab-btn" data-tab="sessions">Sessions</button>
+                <button class="tab-btn" data-tab="devices">Devices</button>
+                <button class="tab-btn" data-tab="info">Info</button>
+            </nav>
+
+            <!-- Peers tab -->
+            <div class="tab-content active" id="tab-peers">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Peer ID</th>
+                            <th>Device</th>
+                            <th>Session</th>
+                            <th>Paired With</th>
+                            <th>Address</th>
+                            <th>Connected</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="peersBody">
+                        <tr><td colspan="7" class="empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Sessions tab -->
+            <div class="tab-content" id="tab-sessions">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Session ID</th>
+                            <th>Host Peer</th>
+                            <th>Device Name</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessionsBody">
+                        <tr><td colspan="4" class="empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Devices tab -->
+            <div class="tab-content" id="tab-devices">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Device ID</th>
+                            <th>Device Name</th>
+                            <th>Session</th>
+                            <th>Status</th>
+                            <th>Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="devicesBody">
+                        <tr><td colspan="5" class="empty">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Info tab -->
+            <div class="tab-content" id="tab-info">
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Server Version</span>
+                        <span class="info-value" id="infoVersion">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Uptime</span>
+                        <span class="info-value" id="infoUptime">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Relay Address</span>
+                        <span class="info-value" id="infoRelayAddr">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Auth Enabled</span>
+                        <span class="info-value" id="infoAuth">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Dashboard</span>
+                        <span class="info-value" id="infoDashboard">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Last Updated</span>
+                        <span class="info-value" id="infoUpdated">--</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <span>OpenDesk Relay Server</span>
+        <span id="refreshInfo">Auto-refresh every 3s</span>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

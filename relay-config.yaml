@@ -1,0 +1,35 @@
+# OpenDesk Relay Server Configuration
+# ====================================
+# This file is read by the relay server on startup.
+# Location: relay-config.yaml (current dir) or ~/.opendesk/relay-config.yaml
+
+server:
+  host: "0.0.0.0"          # Bind address for relay connections
+  port: 8474                # TCP port for relay connections
+  tls_cert: ""              # Path to TLS certificate (empty = no TLS)
+  tls_key: ""               # Path to TLS private key
+
+admin:
+  enabled: true             # Enable web dashboard
+  web_host: "127.0.0.1"     # Bind address for web dashboard
+  web_port: 8484            # Port for web dashboard
+  username: "admin"         # Dashboard admin username
+  password_hash: ""         # Argon2id hash of admin password (empty = no password)
+  api_token: ""             # API token for programmatic access
+
+auth:
+  enabled: true             # Enable authentication
+  whitelist_ips: []         # IP whitelist (CIDR notation, empty = allow all)
+  blacklist_ips: []         # IP blacklist (CIDR notation)
+
+relay:
+  ping_interval: 30         # Seconds between PING messages
+  peer_timeout: 120         # Seconds without activity before disconnect
+  max_message_size: 104857600  # Max message size in bytes (100 MB)
+
+logging:
+  level: "INFO"             # Log level: DEBUG, INFO, WARNING, ERROR
+  file: ""                  # Log file path (empty = console only)
+  format: "text"            # Output format: "text" or "json"
+  max_size: 52428800        # Max log file size (50 MB, for rotation)
+  backup_count: 5           # Number of rotated log files to keep
