@@ -151,10 +151,24 @@ echo "── Step 2/7: Building & installing Python package ──"
 cd "$SCRIPT_DIR"
 echo "  → Building wheel..."
 "$UV" build --wheel
-echo "  → Installing wheel into system Python..."
-"$UV" pip install --system dist/*.whl
 
-echo "  ✓ Python package installed via uv"
+# Create a dedicated virtual environment for the relay server
+# (avoids PEP 668 externally-managed Python errors on modern distros)
+VENV_DIR="${RELAY_DATA_DIR}/venv"
+
+echo "  → Creating virtual environment at ${VENV_DIR}..."
+install -d -m 0755 "$(dirname "$VENV_DIR")" 2>/dev/null || true
+"$UV" venv "$VENV_DIR"
+
+echo "  → Installing wheel into ${VENV_DIR}..."
+"$UV" pip install --python "${VENV_DIR}/bin/python" dist/*.whl
+
+# Symlink binary into PATH
+install -d -m 0755 "${BINDIR}"
+ln -sf "${VENV_DIR}/bin/relay-server" "${BINDIR}/relay-server"
+
+echo "  ✓ Package installed into dedicated venv"
+echo "  ✓ Symlink: ${BINDIR}/relay-server → ${VENV_DIR}/bin/relay-server"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -197,8 +211,15 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════════════
 echo "── Step 5/7: Installing systemd service ──"
 
-# Determine the absolute path of relay-server (installed by uv pip)
-RELAY_BIN="$(command -v relay-server 2>/dev/null || echo "${BINDIR}/relay-server")"
+# Determine the absolute path of relay-server (from venv or system PATH)
+VENV_DIR="${RELAY_DATA_DIR}/venv"
+if [ -x "${VENV_DIR}/bin/relay-server" ]; then
+    RELAY_BIN="${VENV_DIR}/bin/relay-server"
+elif command -v relay-server >/dev/null 2>&1; then
+    RELAY_BIN="$(command -v relay-server)"
+else
+    RELAY_BIN="${BINDIR}/relay-server"
+fi
 
 # Build the service file with correct paths
 sed -e "s|^ExecStart=.*$|ExecStart=${RELAY_BIN} --config ${RELAY_CONF_DIR}/relay-config.yaml|" \
@@ -265,7 +286,8 @@ echo "     sudo systemctl disable ${SERVICE_NAME}"
 echo "     sudo rm -f ${SYSTEMD_DIR}/${SERVICE_NAME}.service"
 echo "     sudo rm -f ${DEFAULT_DIR}/${SERVICE_NAME}"
 echo "     sudo rm -f ${LOGROTATE_DIR}/${SERVICE_NAME}"
-echo "     sudo uv pip uninstall --system ${NAME}"
+echo "     sudo rm -f ${BINDIR}/relay-server"
+echo "     sudo rm -rf ${RELAY_DATA_DIR}/venv"
 echo "     sudo userdel ${USERNAME}"
 echo "     sudo groupdel ${GROUPNAME}"
 echo ""

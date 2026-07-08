@@ -62,14 +62,16 @@ build:
 install: build
 	@printf "$(BLUE)► Installing $(NAME) v$(VERSION)...$(NC)\n\n"
 
-# 1. Install the Python wheel (prefer uv, fallback to pip)
-	@printf "  → Installing Python package...\n"
-	@if command -v uv >/dev/null 2>&1; then \
-		uv pip install --system $(BUILD_DIR)/*.whl; \
-	else \
-		$(PIP) install --no-cache-dir $(BUILD_DIR)/*.whl; \
-	fi
-	@printf "  $(GREEN)✔$(NC) Python package installed\n\n"
+# 1. Install the Python wheel into a dedicated venv
+	@printf "  → Creating virtual environment...\n"
+	@install -d -m 0755 "$(RELAY_DATA_DIR)"
+	@uv venv "$(RELAY_DATA_DIR)/venv" 2>/dev/null || true
+	@printf "  → Installing wheel into venv...\n"
+	@uv pip install --python "$(RELAY_DATA_DIR)/venv/bin/python" $(BUILD_DIR)/*.whl
+	@printf "  → Symlinking binary...\n"
+	@install -d -m 0755 "$(BINDIR)"
+	@ln -sf "$(RELAY_DATA_DIR)/venv/bin/relay-server" "$(BINDIR)/relay-server"
+	@printf "  $(GREEN)✔$(NC) Package installed into venv: $(RELAY_DATA_DIR)/venv\n"
 
 # 2. Create directories
 	@install -d -m 0755 "$(RELAY_CONF_DIR)"
@@ -151,13 +153,10 @@ uninstall:
 # 4. Remove log dir (keep data)
 	@rmdir "$(RELAY_LOG_DIR)" 2>/dev/null || true
 
-# 5. Uninstall Python package (prefer uv, fallback to pip)
-	@if command -v uv >/dev/null 2>&1; then \
-		uv pip uninstall --system -y "$(NAME)" 2>/dev/null || true; \
-	else \
-		$(PIP) uninstall -y "$(NAME)" 2>/dev/null || true; \
-	fi
-	@printf "  $(GREEN)✔$(NC) Python package removed\n\n"
+# 5. Remove venv and symlink
+	@rm -f "$(BINDIR)/relay-server"
+	@rm -rf "$(RELAY_DATA_DIR)/venv"
+	@printf "  $(GREEN)✔$(NC) Virtual environment and symlink removed\n\n"
 
 # 6. Reload systemd
 	@systemctl daemon-reload 2>/dev/null || true
