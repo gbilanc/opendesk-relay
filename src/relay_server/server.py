@@ -211,7 +211,9 @@ class RelayServer:
         while True:
             msg = await Message.from_reader(peer.reader)
             peer.last_activity = time.time()
-            self.metrics.on_message_received(msg.type.name)
+            # Handle both MessageType enum and raw int types
+            type_name = getattr(msg.type, 'name', str(msg.type))
+            self.metrics.on_message_received(type_name)
             self.metrics.on_bytes_received(len(msg.encode()))
             await self._handle_message(peer, msg)
 
@@ -235,7 +237,9 @@ class RelayServer:
                 paired = self._peers.get(peer.paired_peer_id)
                 if paired:
                     await self._send(paired, msg)
-                    self.metrics.on_message_forwarded(msg_type.name)
+                    # Handle both MessageType enum and raw int types
+                    type_name = getattr(msg_type, 'name', str(msg_type))
+                    self.metrics.on_message_forwarded(type_name)
             else:
                 logger.warning(
                     "Unhandled message from %s: %s (not paired)",

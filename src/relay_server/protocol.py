@@ -106,8 +106,17 @@ class Message:
         body_len = struct.unpack(_HEADER_FORMAT, data[:_HEADER_SIZE])[0]
         body = data[_HEADER_SIZE : _HEADER_SIZE + body_len]
         obj = msgpack.unpackb(body)
+        
+        # Handle unknown message types gracefully
+        raw_type = obj["t"]
+        try:
+            msg_type = MessageType(raw_type)
+        except ValueError:
+            # Unknown type - store as raw integer for forwarding
+            msg_type = raw_type
+        
         return cls(
-            type=MessageType(obj["t"]),
+            type=msg_type,
             payload=obj.get("p", {}),
         )
 
