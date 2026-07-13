@@ -127,11 +127,20 @@ class Message:
         while len(header_data) < _HEADER_SIZE:
             chunk = await reader.read(_HEADER_SIZE - len(header_data))
             if not chunk:
+                logger.debug(
+                    "from_reader: got empty chunk while reading header "
+                    "(had %d/%d bytes) — connection closed",
+                    len(header_data), _HEADER_SIZE,
+                )
                 raise ConnectionError("Connection closed while reading header")
             header_data += chunk
 
         body_len = struct.unpack(_HEADER_FORMAT, header_data)[0]
         if body_len > _MAX_MESSAGE_SIZE:
+            logger.warning(
+                "from_reader: message too large: %d bytes (max %d)",
+                body_len, _MAX_MESSAGE_SIZE,
+            )
             raise ValueError(f"Message too large: {body_len} bytes")
 
         body_buf = bytearray(body_len)
@@ -139,12 +148,24 @@ class Message:
         while bytes_read < body_len:
             chunk = await reader.read(body_len - bytes_read)
             if not chunk:
+                logger.debug(
+                    "from_reader: got empty chunk while reading body "
+                    "(had %d/%d bytes) — connection closed",
+                    bytes_read, body_len,
+                )
                 raise ConnectionError("Connection closed while reading body")
             body_buf[bytes_read : bytes_read + len(chunk)] = chunk
             bytes_read += len(chunk)
 
         wire_data = header_data + bytes(body_buf)
-        return cls.decode(wire_data)
+        msg = cls.decode(wire_data)
+        type_name = getattr(msg.type, 'name', str(msg.type))
+        type_value = msg.type.value if isinstance(msg.type, MessageType) else msg.type
+        logger.debug(
+            "from_reader: decoded type=0x%02x (%s) body_len=%d",
+            type_value, type_name, body_len,
+        )
+        return msg
 
     @staticmethod
     def write(writer: Any, msg: Message) -> None:  # noqa: ANN401
