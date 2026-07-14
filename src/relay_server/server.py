@@ -225,7 +225,10 @@ class RelayServer:
             logger.debug("[%s] ← RECV type=0x%02x (%s) payload=%s",
                          peer.peer_id, type_value, type_name, payload_preview)
             self.metrics.on_message_received(type_name)
-            self.metrics.on_bytes_received(len(msg.encode()))
+            try:
+                self.metrics.on_bytes_received(len(msg.encode()))
+            except Exception:
+                logger.debug("[%s] Failed to encode message for metrics", peer.peer_id)
             await self._handle_message(peer, msg)
 
     async def _handle_message(self, peer: RelayPeer, msg: Message) -> None:
@@ -378,6 +381,20 @@ class RelayServer:
                 if host_id and host_id != peer.peer_id:
                     host_peer = self._peers.get(host_id)
                     if host_peer:
+                        # Prevent overwriting an existing active pairing
+                        if host_peer.paired_peer_id is not None:
+                            logger.warning(
+                                "[%s] Lookup: host %s already paired with %s, refusing",
+                                peer.peer_id, host_id, host_peer.paired_peer_id,
+                            )
+                            await self._send(
+                                peer,
+                                Message(MessageType.ERROR, {
+                                    "code": 409,
+                                    "message": "Device already paired with another peer",
+                                }),
+                            )
+                            return
                         logger.debug("[%s] Lookup: pairing %s ↔ %s",
                                      peer.peer_id, host_id, peer.peer_id)
                         peer.session_id = session_id
@@ -451,6 +468,21 @@ class RelayServer:
                 logger.info("[%s] Session taken over: %s", peer.peer_id, session_id)
                 return
 
+            # Prevent overwriting an existing active pairing
+            if host_peer.paired_peer_id is not None:
+                logger.warning(
+                    "[%s] Join: host %s already paired with %s, refusing",
+                    peer.peer_id, host_id, host_peer.paired_peer_id,
+                )
+                await self._send(
+                    peer,
+                    Message(MessageType.ERROR, {
+                        "code": 409,
+                        "message": "Device already paired with another peer",
+                    }),
+                )
+                return
+
             peer.session_id = session_id
             peer.paired_peer_id = host_id
             host_peer.paired_peer_id = peer.peer_id
@@ -520,7 +552,7 @@ class RelayServer:
             inner_name = inner_type_enum.name
         except ValueError:
             inner_name = f"0x{inner_type:02x}"
-            inner_type_enum = inner_type
+            inner_type_enum = MessageType.ERROR
 
         inner_payload = payload.get("inner_payload", {})
         inner_msg = Message(inner_type_enum, inner_payload)
@@ -593,9 +625,15 @@ class RelayServer:
             logger.debug("[%s] Peer was paired with %s, notifying them", peer_id, peer.paired_peer_id)
             paired = self._peers.get(peer.paired_peer_id)
             if paired:
-                logger.debug("[%s] Unpairing %s (paired.paired was %s)",
-                             peer_id, peer.paired_peer_id, paired.paired_peer_id)
-                paired.paired_peer_id = None
+                # Only unpair if the paired peer still points back to us
+                # This prevents breaking a newer pairing (race condition fix)
+                if paired.paired_peer_id == peer_id:
+                    logger.debug("[%s] Unpairing %s (paired.paired was %s)",
+                                 peer_id, peer.paired_peer_id, paired.paired_peer_id)
+                    paired.paired_peer_id = None
+                else:
+                    logger.debug("[%s] Not unpairing %s: paired_peer_id changed to %s",
+                                 peer_id, peer.paired_peer_id, paired.paired_peer_id)
                 asyncio.ensure_future(
                     self._send(
                         paired,

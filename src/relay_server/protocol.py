@@ -80,9 +80,10 @@ class Message:
 
     def encode(self) -> bytes:
         """Encode message to bytes for transport."""
+        type_val = self.type.value if isinstance(self.type, MessageType) else self.type
         body = msgpack.packb(
             {
-                "t": self.type.value,
+                "t": type_val,
                 "p": self.payload,
             }
         )
@@ -112,9 +113,12 @@ class Message:
         try:
             msg_type = MessageType(raw_type)
         except ValueError:
-            # Unknown type - store as raw integer for forwarding
-            msg_type = raw_type
-        
+            logger.warning(
+                "decode: unknown message type 0x%02x, treating as ERROR",
+                raw_type,
+            )
+            msg_type = MessageType.ERROR
+
         return cls(
             type=msg_type,
             payload=obj.get("p", {}),
