@@ -547,15 +547,16 @@ class RelayServer:
             return
 
         inner_type = payload.get("inner_type", 0)
+        inner_payload = payload.get("inner_payload", {})
+
+        # Use raw int for inner type — the receiving peer has the full
+        # MessageType enum and will decode it correctly.
+        inner_msg = Message(type=inner_type, payload=inner_payload)
+
         try:
-            inner_type_enum = MessageType(inner_type)
-            inner_name = inner_type_enum.name
+            inner_name = MessageType(inner_type).name
         except ValueError:
             inner_name = f"0x{inner_type:02x}"
-            inner_type_enum = MessageType.ERROR
-
-        inner_payload = payload.get("inner_payload", {})
-        inner_msg = Message(inner_type_enum, inner_payload)
 
         logger.debug("[%s] RELAY_ROUTE: wrapping inner_type=0x%02x (%s) → %s",
                      peer.peer_id, inner_type, inner_name, peer.paired_peer_id)
