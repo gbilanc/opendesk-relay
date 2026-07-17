@@ -45,10 +45,49 @@ class MessageType(IntEnum):
     # ── Signalling / handshake ──
     HELLO = 0x01
     HELLO_ACK = 0x02
+    KEY_EXCHANGE = 0x03
+    KEY_EXCHANGE_ACK = 0x04
     AUTH_REQUEST = 0x05
     AUTH_RESPONSE = 0x06
     AUTH_OK = 0x07
     AUTH_FAIL = 0x08
+    SESSION_INFO = 0x09
+
+    # ── Video ──
+    VIDEO_FRAME = 0x10
+    VIDEO_REQUEST_KEYFRAME = 0x11
+    VIDEO_TILE = 0x12
+
+    # ── Input ──
+    MOUSE_EVENT = 0x20
+    KEYBOARD_EVENT = 0x21
+    TEXT_INPUT = 0x22
+
+    # ── Clipboard ──
+    CLIPBOARD_TEXT = 0x30
+    CLIPBOARD_IMAGE = 0x31
+    CLIPBOARD_SYNC = 0x32
+
+    # ── File transfer ──
+    FILE_REQUEST = 0x40
+    FILE_ACCEPT = 0x41
+    FILE_REJECT = 0x42
+    FILE_CHUNK = 0x43
+    FILE_COMPLETE = 0x44
+    FILE_ERROR = 0x45
+    FILE_PROGRESS = 0x46
+    FILE_LIST_REQUEST = 0x47
+    FILE_LIST_RESPONSE = 0x48
+    FILE_DOWNLOAD_REQUEST = 0x49
+    FILE_DOWNLOAD_ACCEPT = 0x4A
+    FILE_DOWNLOAD_REJECT = 0x4B
+
+    # ── Audio ──
+    AUDIO_FRAME = 0x50
+
+    # ── Chat ──
+    CHAT_MESSAGE = 0x60
+    CHAT_TYPING = 0x61
 
     # ── Keep-alive ──
     PING = 0x70
@@ -108,16 +147,18 @@ class Message:
         body = data[_HEADER_SIZE : _HEADER_SIZE + body_len]
         obj = msgpack.unpackb(body)
         
-        # Handle unknown message types gracefully
+        # Preserve the raw type value even if not in our enum.
+        # The receiving peer has the full MessageType and can decode
+        # it correctly.  We just forward it blindly.
         raw_type = obj["t"]
         try:
             msg_type = MessageType(raw_type)
         except ValueError:
-            logger.warning(
-                "decode: unknown message type 0x%02x, treating as ERROR",
+            logger.debug(
+                "decode: unknown message type 0x%02x, preserving raw value",
                 raw_type,
             )
-            msg_type = MessageType.ERROR
+            msg_type = raw_type  # keep as raw int for forwarding
 
         return cls(
             type=msg_type,
