@@ -337,6 +337,29 @@ class RelayServer:
 
     # ── message routing ─────────────────────────────────────────────
 
+    def _drop_stale_paired(self, host_peer: RelayPeer) -> bool:
+        """Se il peer accoppiato a ``host_peer`` è stale, rimuoviamolo.
+
+        Restituisce True se il pairing è stato liberato (il join può
+        procedere), False se il vecchio peer è ancora vivo (409 legittimo).
+        """
+        old_id = host_peer.paired_peer_id
+        if old_id is None:
+            return True
+        old = self._peers.get(old_id)
+        timeout = self.config.relay.peer_timeout
+        if old is not None and time.time() - old.last_activity <= timeout:
+            return False
+        logger.warning(
+            "[%s] Dropping stale paired peer %s (session %s): non attivo da "
+            "oltre %ds — rimozione forzata per liberare l'host",
+            host_peer.peer_id, old_id, host_peer.session_id, timeout,
+        )
+        # Togli il pairing reciproco PRIMA del pop, poi rimuovi il peer.
+        host_peer.paired_peer_id = None
+        self._remove_peer(old_id)
+        return True
+
     async def _handle_register(self, peer: RelayPeer, payload: dict) -> None:
         """Handle peer registration.
 
@@ -381,20 +404,26 @@ class RelayServer:
                 if host_id and host_id != peer.peer_id:
                     host_peer = self._peers.get(host_id)
                     if host_peer:
-                        # Prevent overwriting an existing active pairing
+                        # Prevent overwriting an existing active pairing.
+                        # Self-healing: se il peer accoppiato è stale
+                        # (chiusura brutta, half-open) rimuoviamolo e
+                        # procediamo, invece di rifiutare il nuovo join.
                         if host_peer.paired_peer_id is not None:
-                            logger.warning(
-                                "[%s] Lookup: host %s already paired with %s, refusing",
-                                peer.peer_id, host_id, host_peer.paired_peer_id,
-                            )
-                            await self._send(
-                                peer,
-                                Message(MessageType.ERROR, {
-                                    "code": 409,
-                                    "message": "Device already paired with another peer",
-                                }),
-                            )
-                            return
+                            if self._drop_stale_paired(host_peer):
+                                logger.info(
+                                    "[%s] Lookup: stale pairing with %s dropped, proceeding",
+                                    peer.peer_id, host_peer.paired_peer_id,
+                                )
+                            else:
+                                logger.warning(
+                                    "[%s] Lookup: host %s already paired with %s, refusing",
+                                    peer.peer_id, host_id, host_peer.paired_peer_id,
+                                )
+                                await self._send(
+                                    peer,
+                                    Message.error(409, "Device already paired with another peer"),
+                                )
+                                return
                         logger.debug("[%s] Lookup: pairing %s ↔ %s",
                                      peer.peer_id, host_id, peer.peer_id)
                         peer.session_id = session_id
@@ -468,20 +497,24 @@ class RelayServer:
                 logger.info("[%s] Session taken over: %s", peer.peer_id, session_id)
                 return
 
-            # Prevent overwriting an existing active pairing
+            # Prevent overwriting an existing active pairing.
+            # Self-healing: drop del pairing stale (vedi _drop_stale_paired).
             if host_peer.paired_peer_id is not None:
-                logger.warning(
-                    "[%s] Join: host %s already paired with %s, refusing",
-                    peer.peer_id, host_id, host_peer.paired_peer_id,
-                )
-                await self._send(
-                    peer,
-                    Message(MessageType.ERROR, {
-                        "code": 409,
-                        "message": "Device already paired with another peer",
-                    }),
-                )
-                return
+                if self._drop_stale_paired(host_peer):
+                    logger.info(
+                        "[%s] Join: stale pairing with %s dropped, proceeding",
+                        peer.peer_id, host_peer.paired_peer_id,
+                    )
+                else:
+                    logger.warning(
+                        "[%s] Join: host %s already paired with %s, refusing",
+                        peer.peer_id, host_id, host_peer.paired_peer_id,
+                    )
+                    await self._send(
+                        peer,
+                        Message.error(409, "Device already paired with another peer"),
+                    )
+                    return
 
             peer.session_id = session_id
             peer.paired_peer_id = host_id
@@ -580,11 +613,31 @@ class RelayServer:
         except ConnectionError as e:
             logger.warning("[%s] ❌ Send failed (connection closed): type=0x%02x (%s) err=%s",
                            peer.peer_id, type_value, type_name, e)
+            # Scollare ENTRAMBI i peer prima del pop: se eliminassimo
+            # solo il destinatario, il controllore resterebbe "paired"
+            # verso un peer fantasma e i nuovi join prenderebbero 409.
+            self._force_unpair(peer)
             self._remove_peer(peer.peer_id)
         except Exception as e:
             logger.exception("[%s] ❌ Send failed: type=0x%02x (%s) err=%s",
                              peer.peer_id, type_value, type_name, e)
+            self._force_unpair(peer)
             self._remove_peer(peer.peer_id)
+
+    def _force_unpair(self, peer: RelayPeer) -> None:
+        """Scolla ``peer`` e il suo controllore (reciproco, se coerente).
+
+        Usato dai failure handler di ``_send``: poppare il solo destinatario
+        lascerebbe l'altro con ``paired_peer_id`` verso un fantasma.
+        Non toccare ``paired_peer_id`` di controllori che puntano ad altri
+        (race: pairing già sostituito).
+        """
+        if peer.paired_peer_id is None:
+            return
+        other = self._peers.get(peer.paired_peer_id)
+        if other is not None and other.paired_peer_id == peer.peer_id:
+            other.paired_peer_id = None
+        peer.paired_peer_id = None
 
     def _remove_peer(self, peer_id: str) -> None:
         """Remove a peer and clean up associated state."""

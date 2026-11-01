@@ -282,6 +282,9 @@ Una volta abbinati:
 ### 5.5 Fase 4: Disconnessione
 
 1. Un peer invia `DISCONNECT` o chiude la connessione TCP
+   (il client OpenDesk invia ora `DISCONNECT` esplicito prima di
+   chiudere il socket, sia alla chiusura pulita della sessione sia in
+   caso di link half-open —vedi §5.6—; questo scolla subito il partner)
 2. Il relay server:
    - Rimuove il peer dalla tabella `_peers`
    - Invia un `ERROR` con codice `410 (Peer disconnected)` al peer ancora connesso
@@ -289,12 +292,29 @@ Una volta abbinati:
    - Se il peer disconnesso era l'host, elimina anche la sessione
 3. Il peer superstite può attendere una riconnessione o terminare
 
+**Self-healing dei pairing stale:** se la chiusura non è mai arrivata
+(crash, cavo staccato, NAT silenzioso), l'host resterebbe `paired` verso
+un peer fantasma e ogni nuovo join riceverebbe `409`.  Prima di
+ rifiutare, il server verifica lo stato del peer accoppiato
+(`_drop_stale_paired`): se è assente da `_peers` o inattivo da più di
+`peer_timeout`, lo rimuove e procede con il nuovo accoppiamento.  Il
+409 viene emesso solo se il vecchio peer è ancora attivo.
+Nota: anche un fallimento di invio verso un peer (`_send` →
+`ConnectionError`) ora scolla entrambe le estremità prima della
+rimozione (`_force_unpair`), evitando pairing "verso fantasma".
+
 ### 5.6 Keep-alive e timeout
 
-- I peer inviano **PING** ogni 30 secondi (costante `_PING_INTERVAL`)
+- I peer inviano **PING** ogni 25-30 secondi (costante `_PING_INTERVAL`)
 - Il relay risponde con **PONG**
 - Se un peer non mostra attività per **120 secondi** (costante `_PEER_TIMEOUT`), viene considerato **stale** e disconnesso automaticamente
 - Il controllo avviene in un loop asincrono periodico (`_cleanup_loop`)
+- **Lato client**: i PING mantengono `last_activity` fresco sul relay,
+  quindi un link **half-open** (il verso client→relay funziona, il
+  ritorno è morto) non scade mai da solo.  Il client quindi traccia
+  l'ultimo PONG: se non ne arrivano da 3×`_PING_INTERVAL` (~75 s) la
+  sessione si chiude da sola inviando `DISCONNECT` e rilasciando il
+  socket, liberando imediatamente il pairing dell'host sul relay.
 
 ---
 
@@ -402,6 +422,7 @@ Il relay utilizza i seguenti codici di errore (standardizzati in `MessageType.ER
 | Codice | Significato | Causa |
 |---|---|---|
 | `404` | Session not found | Il session ID specificato non esiste (guest tenta di unirsi a sessione inesistente) |
+| `409` | Device already paired with another peer | L'host è già accoppiato con un peer **attivo**.  Se il vecchio pairing è *stale* (chiusura brutale) il server lo rimuove automaticamente e il join riesce: il 409 non è più un blocco persistente.  Il client lo traduce in "This device is already connected to another computer" |
 | `410` | Host disconnected | L'host della sessione si è disconnesso prima che il guest si unisse |
 | `410` | Peer disconnected | Il peer abbinato si è disconnesso (inviato al peer superstite) |
 

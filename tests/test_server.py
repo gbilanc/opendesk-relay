@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ import pytest
 from relay_server.auth import RelayAuth
 from relay_server.config import Config
 from relay_server.protocol import Message, MessageType
-from relay_server.server import RelayServer
+from relay_server.server import RelayPeer, RelayServer
 
 
 @pytest.fixture
@@ -290,6 +291,116 @@ async def _send_recv(reader, writer, msg: Message) -> Message:
     Message.write(writer, msg)
     await writer.drain()
     return await Message.from_reader(reader)
+
+
+class TestStalePairingSelfHeal:
+    """Regression test: join dopo chiusura brutale non deve ricevere 409."""
+
+    def _mk_peer(self, peer_id: str, last_activity: float | None = None) -> RelayPeer:
+        return RelayPeer(
+            peer_id=peer_id,
+            writer=None,  # type: ignore[arg-type]
+            reader=None,  # type: ignore[arg-type]
+            last_activity=last_activity or time.time(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_drop_stale_paired_removes_dead_peer(self, server: RelayServer) -> None:
+        host = self._mk_peer("host-1")
+        dead = self._mk_peer("guest-dead", last_activity=time.time() - 99999)
+        host.paired_peer_id = "guest-dead"
+        dead.paired_peer_id = "host-1"
+        server._peers.update({"host-1": host, "guest-dead": dead})
+        server._sessions["123 456 789"] = "host-1"
+        dead.session_id = "123 456 789"
+
+        assert server._drop_stale_paired(host) is True
+        assert host.paired_peer_id is None
+        assert "guest-dead" not in server._peers
+
+    @pytest.mark.asyncio
+    async def test_drop_stale_paired_keeps_live_pairing(self, server: RelayServer) -> None:
+        host = self._mk_peer("host-1")
+        alive = self._mk_peer("guest-alive")
+        host.paired_peer_id = "guest-alive"
+        alive.paired_peer_id = "host-1"
+        server._peers.update({"host-1": host, "guest-alive": alive})
+
+        assert server._drop_stale_paired(host) is False
+        assert host.paired_peer_id == "guest-alive"
+        assert "guest-alive" in server._peers
+
+    @pytest.mark.asyncio
+    async def test_join_after_stale_pairing_succeeds(self, server: RelayServer) -> None:
+        """Host paired con peer morto → nuovo guest si accoppia, niente 409."""
+        host = self._mk_peer("host-1")
+        host.session_id = "123 456 789"
+        dead = self._mk_peer("guest-dead", last_activity=time.time() - 99999)
+        host.paired_peer_id = "guest-dead"
+        dead.paired_peer_id = "host-1"
+        server._peers.update({"host-1": host, "guest-dead": dead})
+        server._sessions["123 456 789"] = "host-1"
+
+        sent: list[tuple[str, Message]] = []
+
+        async def fake_send(peer: RelayPeer, msg: Message) -> None:
+            sent.append((peer.peer_id, msg))
+
+        server._send = fake_send  # type: ignore[method-assign]
+
+        guest = self._mk_peer("guest-new")
+        await server._handle_register(guest, {"session_id": "123 456 789"})
+
+        assert host.paired_peer_id == "guest-new"
+        assert guest.paired_peer_id == "host-1"
+        assert "guest-dead" not in server._peers
+        codes = [m.payload.get("code") for _, m in sent]
+        assert 409 not in codes
+        paired = [m for pid, m in sent if pid == "guest-new" and m.type == MessageType.RELAY_REGISTER]
+        assert paired and paired[0].payload.get("paired") is True
+
+    @pytest.mark.asyncio
+    async def test_join_live_pairing_still_refused_409(self, server: RelayServer) -> None:
+        host = self._mk_peer("host-1")
+        host.session_id = "123 456 789"
+        alive = self._mk_peer("guest-alive")
+        host.paired_peer_id = "guest-alive"
+        alive.paired_peer_id = "host-1"
+        server._peers.update({"host-1": host, "guest-alive": alive})
+        server._sessions["123 456 789"] = "host-1"
+
+        sent: list[tuple[str, Message]] = []
+
+        async def fake_send(peer: RelayPeer, msg: Message) -> None:
+            sent.append((peer.peer_id, msg))
+
+        server._send = fake_send  # type: ignore[method-assign]
+
+        guest = self._mk_peer("guest-new")
+        await server._handle_register(guest, {"session_id": "123 456 789"})
+
+        assert host.paired_peer_id == "guest-alive"  # intatto
+        assert any(m.payload.get("code") == 409 for _, m in sent)
+
+    def test_force_unpair_clears_both_sides(self, server: RelayServer) -> None:
+        a = self._mk_peer("a")
+        b = self._mk_peer("b")
+        a.paired_peer_id = "b"
+        b.paired_peer_id = "a"
+        server._peers.update({"a": a, "b": b})
+        server._force_unpair(a)
+        assert a.paired_peer_id is None and b.paired_peer_id is None
+
+    def test_force_unpair_respects_newer_pairing(self, server: RelayServer) -> None:
+        a = self._mk_peer("a")
+        b = self._mk_peer("b")
+        c = self._mk_peer("c")
+        a.paired_peer_id = "b"
+        b.paired_peer_id = "c"  # race: b già riesercata verso c
+        server._peers.update({"a": a, "b": b, "c": c})
+        server._force_unpair(a)
+        assert a.paired_peer_id is None
+        assert b.paired_peer_id == "c"  # non toccare il pairing nuovo
 
 
 async def _drain_messages(reader, count: int) -> list[Message]:
