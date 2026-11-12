@@ -1,0 +1,32 @@
+# OpenDesk Relay — configurazione di produzione (relay.gibisoft.net)
+# Installazione: /etc/opendesk-relay/relay-config.yaml
+server:
+  host: "0.0.0.0"
+  port: 8474
+  tls_cert: ""
+  tls_key: ""
+
+admin:
+  enabled: true
+  web_host: "127.0.0.1"     # dietro reverse proxy Apache (HTTPS)
+  web_port: 8484
+  username: "admin"
+  password_hash: "$argon2id$v=19$m=65536,t=3,p=4$kr/jGFu5DsiI7vbDoR8tog$bBeB3zTP4dnUJBeJzbETFC/o19gCWxZy0T6d5S3Mfts"
+  api_token: "viyDrtruIcGhWRxqsoZi77S1uKC7SC_g3HHV1me_AS0"
+
+auth:
+  enabled: true
+  whitelist_ips: []         # restringi se vuoi (es. ["130.78.0.0/16"])
+  blacklist_ips: []
+
+relay:
+  ping_interval: 30
+  peer_timeout: 120
+  max_message_size: 104857600
+
+logging:
+  level: "INFO"
+  file: "/var/log/opendesk-relay/relay.log"
+  format: "text"
+  max_size: 52428800
+  backup_count: 5
