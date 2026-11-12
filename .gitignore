@@ -24,3 +24,6 @@ Thumbs.db
 
 # uv
 uv.lock
+
+# credenziali di produzione (solo sul server)
+deploy/relay-config-prod.yaml
