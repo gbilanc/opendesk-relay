@@ -32,6 +32,7 @@ LOGROTATE_DIR ?= $(DESTDIR)/etc/logrotate.d
 RELAY_CONF_DIR  ?= $(DESTDIR)/etc/opendesk-relay
 RELAY_LOG_DIR   ?= $(DESTDIR)/var/log/opendesk-relay
 RELAY_DATA_DIR  ?= $(DESTDIR)/var/lib/opendesk-relay
+BINDIR          ?= $(DESTDIR)$(PREFIX)/bin
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 BLUE  := \033[1;34m
@@ -48,6 +49,7 @@ all: build
 # ═══════════════════════════════════════════════════════════════════════════
 build:
 	@printf "$(BLUE)► Building wheel $(NAME) v$(VERSION)...$(NC)\n"
+	@rm -rf build src/opendesk_relay_server.egg-info
 	@if command -v uv &>/dev/null; then \
 		uv build --wheel; \
 	else \

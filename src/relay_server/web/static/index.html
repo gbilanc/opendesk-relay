@@ -155,6 +155,22 @@
         <span id="refreshInfo">Auto-refresh every 3s</span>
     </footer>
 
+    <!-- Login overlay -->
+    <div class="login-overlay" id="loginOverlay" hidden>
+        <form class="login-box" id="loginForm">
+            <h2>🔐 Accesso Dashboard</h2>
+            <p class="login-hint">Credenziali admin oppure API token</p>
+            <input type="text" id="loginUser" placeholder="Username" autocomplete="username" required>
+            <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+            <label class="login-token-mode">
+                <input type="checkbox" id="loginTokenMode">
+                Accedi con API token (usa il campo username)
+            </label>
+            <button type="submit">Accedi</button>
+            <p class="login-error" id="loginError" hidden>Credenziali non valide</p>
+        </form>
+    </div>
+
     <script src="/static/app.js"></script>
 </body>
 </html>

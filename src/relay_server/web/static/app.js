@@ -69,13 +69,67 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ── Authentication ───────────────────────────────────────────────────
+// Credentials are kept in sessionStorage (cleared when the tab closes)
+// and sent as HTTP Basic / Bearer on every API call.
+
+function savedAuth() {
+    return sessionStorage.getItem('relayAuth'); // "Basic xxx" or "Bearer xxx"
+}
+
+function authHeader() {
+    const auth = savedAuth();
+    return auth ? { 'Authorization': auth } : {};
+}
+
+function loginSubmit(token, user, pass) {
+    let header;
+    if (token) {
+        header = `Bearer ${token}`;
+    } else {
+        header = 'Basic ' + btoa(`${user}:${pass}`);
+    }
+    return fetch('/api/status', { headers: { 'Authorization': header } })
+        .then(async (res) => {
+            if (!res.ok) {
+                const body = await res.text().catch(() => '');
+                throw new Error(`HTTP ${res.status}: ${body.slice(0, 120)}`);
+            }
+            sessionStorage.setItem('relayAuth', header);
+            return true;
+        })
+        .catch((err) => {
+            const el = $('#loginError');
+            el.textContent = err.message || 'Errore di rete';
+            el.hidden = false;
+            return false;
+        });
+}
+
 // ── API calls ────────────────────────────────────────────────────────
 async function fetchJSON(url) {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: authHeader() });
+    if (res.status === 401) {
+        showLogin();
+        throw new Error('Autenticazione richiesta');
+    }
     if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     }
     return res.json();
+}
+
+function showLogin() {
+    $('#loginOverlay').hidden = false;
+    $('#loginUser').focus();
+    refreshTimer && clearInterval(refreshTimer);
+    refreshTimer = null;
+}
+
+function hideLogin() {
+    $('#loginOverlay').hidden = true;
+    $('#loginError').hidden = true;
+    if (!refreshTimer) refreshTimer = setInterval(refresh, REFRESH_INTERVAL);
 }
 
 // ── UI updates ───────────────────────────────────────────────────────
@@ -212,6 +266,33 @@ async function refresh() {
     }
 }
 
+// ── Login form wiring ─────────────────────────────────────────────────
+$('#loginForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const user = $('#loginUser').value.trim();
+    const useToken = $('#loginTokenMode').checked;
+    const pass = $('#loginPass').value;
+    const ok = useToken
+        ? await loginSubmit(user)                // username field holds the API token
+        : await loginSubmit(null, user, pass);   // admin credentials (Basic)
+    if (ok) {
+        hideLogin();
+        refresh();
+    }
+    // on failure loginSubmit() already shows the detailed error
+});
+
+// In token mode the password field is irrelevant (and may be autofilled
+// by the browser): disable it so it can't be submitted accidentally.
+$('#loginTokenMode').addEventListener('change', (ev) => {
+    $('#loginPass').disabled = ev.target.checked;
+    if (ev.target.checked) $('#loginPass').value = '';
+});
+
 // ── Init ─────────────────────────────────────────────────────────────
-refresh();
-refreshTimer = setInterval(refresh, REFRESH_INTERVAL);
+if (savedAuth()) {
+    refresh();
+    refreshTimer = setInterval(refresh, REFRESH_INTERVAL);
+} else {
+    showLogin();
+}

@@ -106,6 +106,11 @@ def main(argv: list[str] | None = None) -> None:
     async def _run() -> None:
         server = RelayServer(config=config)
 
+        # Register the API token from config so Bearer auth works
+        # (RelayAuth only loads tokens from credentials.json otherwise).
+        if config.admin.api_token:
+            server.auth.add_api_token(config.admin.api_token)
+
         # Start web dashboard if enabled
         if config.admin.enabled:
             web_app = create_web_app(server, config)

@@ -309,3 +309,55 @@ body {
         padding: 6px 8px;
     }
 }
+
+/* ── Login overlay ──────────────────────────────────────────────────── */
+.login-overlay[hidden] { display: none; }  /* hidden must win over display:flex */
+.login-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(1, 4, 9, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.login-box {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 32px;
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.login-box h2 { margin: 0 0 4px; font-size: 1.1rem; color: #e6edf3; }
+.login-hint { margin: 0; font-size: 0.8rem; color: #8b949e; }
+.login-box input {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #e6edf3;
+    padding: 10px 12px;
+    font-size: 0.95rem;
+}
+.login-box button {
+    background: #238636;
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    padding: 10px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.login-box button:hover { background: #2ea043; }
+.login-error { color: #f85149; font-size: 0.85rem; margin: 0; }
+.login-token-mode {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #8b949e;
+    cursor: pointer;
+}
+.login-token-mode input { accent-color: #238636; }

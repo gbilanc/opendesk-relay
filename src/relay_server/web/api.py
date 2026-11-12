@@ -64,10 +64,12 @@ def _check_auth(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     # No auth provided
+    # No WWW-Authenticate header on purpose: sending it makes the browser
+    # pop up its native basic-auth dialog. The dashboard handles login
+    # itself via the login overlay in the static UI.
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required",
-        headers={"WWW-Authenticate": "Basic realm=\"relay-server\", Bearer"},
     )
 
 

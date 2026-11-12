@@ -267,15 +267,16 @@ class RelayAuth:
 
     # ── API token management ────────────────────────────────────────
 
-    def add_api_token(self) -> str:
-        """Generate and register a new API token.
+    def add_api_token(self, token: str | None = None) -> str:
+        """Register an API token (generates one if not provided).
 
         Returns
         -------
         str
-            The new token (show once, cannot be retrieved later).
+            The registered token (show once if generated, cannot be
+            retrieved later).
         """
-        token = generate_api_token()
+        token = token or generate_api_token()
         self._api_tokens.add(token)
         self._save()
         logger.info("API token added")
