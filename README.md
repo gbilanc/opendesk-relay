@@ -114,6 +114,16 @@ Verifica end-to-end (listener, handshake, UFW, test reale da 3 nodi esterni, ril
 sudo ./deploy/check-connectivity.sh     # include anche le regole UFW
 ```
 
+Test a livello di **protocollo** (verifica che un client OpenDesk venga realmente servito:
+PING/PONG, `RELAY_REGISTER`, assegnazione sessione):
+
+```bash
+./deploy/probe-relay.py relay.gibisoft.net 8474     # usa <venv>/bin/python se manca msgpack
+./deploy/probe-relay.py 130.78.81.63 8474           # bypassa il DNS/hosts locale
+```
+
+Exit `0` = handshake ok, `1` = il relay non risponde correttamente.
+
 Nota: `curl http://<host>:8474/` restituisce *Empty reply from server* con exit 52 — è il
 comportamento atteso, la porta parla un protocollo binario e non HTTP.
 
