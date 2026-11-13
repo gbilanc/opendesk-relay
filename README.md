@@ -80,6 +80,43 @@ sudo journalctl -u opendesk-relay -f          # Follow logs
 sudo systemctl restart opendesk-relay         # Restart
 ```
 
+### Esporre la porta 8474 su Internet
+
+Il relay ascolta su `0.0.0.0:8474` (config `server.host`/`server.port`), ma perché i client
+remoti possano connettersi servono **tre** cose in fila:
+
+```text
+client Internet → [router/NAT: port forward TCP 8474] → [ufw: allow 8474] → relay-server
+```
+
+1. **Firewall locale (UFW)** — la regola deve valere per «Anywhere» o per la CIDR dei client:
+
+   ```bash
+   sudo ufw allow 8474/tcp comment 'opendesk-relay WAN'
+   sudo ufw reload
+   sudo ufw status | grep 8474
+   ```
+
+   ⚠ Una regola limitata alla LAN (`ufw allow from 192.168.178.0/24 to any port 8474`)
+   **non** apre la porta a Internet: il servizio risponde in LAN ma i client remoti vanno in timeout.
+
+2. **Port forward sul router** — TCP 8474 verso l'IP LAN del server (es. `192.168.178.142`).
+   Su FRITZ!Box: *Internet ▸ Permettere accesso ▸ Condivisioni porta ▸ Aggiungi dispositivo*.
+   La 8484 (dashboard) **non** va inoltrata: resta su `127.0.0.1` dietro il reverse proxy Apache su 443.
+
+3. **Firewall del provider / security group** — se il server è in cloud, la porta non standard
+   va aperta anche lì.
+
+Verifica end-to-end (listener, handshake, UFW, test reale da 3 nodi esterni, rilevamento NAT):
+
+```bash
+./deploy/check-connectivity.sh          # exit 0 = ok, 1 = locale ko, 2 = non raggiungibile da Internet
+sudo ./deploy/check-connectivity.sh     # include anche le regole UFW
+```
+
+Nota: `curl http://<host>:8474/` restituisce *Empty reply from server* con exit 52 — è il
+comportamento atteso, la porta parla un protocollo binario e non HTTP.
+
 ### Uninstall
 
 ```bash
