@@ -117,6 +117,25 @@ sudo ./deploy/check-connectivity.sh     # include anche le regole UFW
 Nota: `curl http://<host>:8474/` restituisce *Empty reply from server* con exit 52 — è il
 comportamento atteso, la porta parla un protocollo binario e non HTTP.
 
+#### Accesso dalla LAN (NAT loopback)
+
+Se il server è dietro NAT (es. `192.168.178.142` dietro un FRITZ!Box), un client nella
+stessa LAN che usa il nome pubblico dipende dal *NAT loopback* del router e da un DNS che
+risolva l'IP pubblico corrente: se il nome punta a un IP vecchio, o il resolver del client
+è irraggiungibile, la pagina non si apre mentre da Internet funziona.
+
+Soluzione più affidabile — mappare il nome sull'IP LAN nel file hosts del client:
+
+```
+# /etc/hosts (Linux/macOS) oppure C:\Windows\System32\drivers\etc\hosts (Windows)
+192.168.178.142 relay.gibisoft.net
+```
+
+Il certificato resta valido (è emesso per il nome, non per l'IP). In alternativa si può
+usare direttamente `https://192.168.178.142` (con warning del browser sul nome).
+Attenzione: il NAT loopback non funziona dalla **WLAN ospiti** del router, che è isolata
+dalla LAN.
+
 ### Uninstall
 
 ```bash
