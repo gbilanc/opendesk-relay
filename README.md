@@ -191,6 +191,10 @@ The relay server uses a three-layer configuration cascade (each level overrides 
 server:
   host: "0.0.0.0"
   port: 8474
+  tls_cert: ""             # e.g. /etc/opendesk-relay/tls/fullchain.pem
+  tls_key: ""              # e.g. /etc/opendesk-relay/tls/privkey.pem
+  tls_min_version: "TLSv1_2"   # TLSv1_2 | TLSv1_3
+  tls_ciphers: ""          # optional OpenSSL cipher string
 
 admin:
   enabled: true
@@ -207,11 +211,46 @@ auth:
 relay:
   ping_interval: 30
   peer_timeout: 120
+  max_message_size: 104857600        # hard cap per message body (100 MB)
+  pre_auth_max_message_size: 1048576 # stricter cap until RELAY_REGISTER (1 MB)
 
 logging:
   level: "INFO"
   format: "text"       # or "json"
   file: "/var/log/opendesk-relay/relay.log"
+```
+
+> `max_message_size` is enforced by `Message.from_reader()`. Bodies are
+> assembled incrementally, so a peer that announces a huge frame but never
+> sends it does not make the server allocate the buffer.
+>
+> `pre_auth_max_message_size` is best-effort DoS hardening: `RELAY_REGISTER`
+> carries no credentials, so it is not a security boundary. Combine it with
+> `MemoryMax=` / `TasksMax=` in the systemd unit.
+
+### TLS certificate reload
+
+Sending `SIGHUP` swaps the certificate on the live `SSLContext`: new
+handshakes use the renewed certificate, existing connections keep running,
+and the listener is never dropped.
+
+```bash
+systemctl reload opendesk-relay      # requires ExecReload=/bin/kill -HUP $MAINPID
+# or:  kill -HUP $(systemctl show -p MainPID --value opendesk-relay)
+```
+
+A certbot deploy hook that copies the certificate and reloads the unit:
+
+```sh
+# /etc/letsencrypt/renewal-hooks/deploy/relay-certs.sh
+#!/bin/sh
+set -eu
+SRC=/etc/letsencrypt/live/relay.example.com
+DST=/etc/opendesk-relay/tls
+install -d -o opendesk-relay -g opendesk-relay -m 0750 "$DST"
+install -o root -g opendesk-relay -m 0640 "$SRC/fullchain.pem" "$DST/fullchain.pem"
+install -o root -g opendesk-relay -m 0640 "$SRC/privkey.pem"   "$DST/privkey.pem"
+systemctl reload opendesk-relay || systemctl restart opendesk-relay
 ```
 
 ### Environment variables
@@ -231,6 +270,12 @@ logging:
 | `RELAY_BLACKLIST_IPS` | — | Comma-separated CIDR blacklist |
 | `RELAY_PING_INTERVAL` | `30` | PING interval (seconds) |
 | `RELAY_PEER_TIMEOUT` | `120` | Peer timeout (seconds) |
+| `RELAY_MAX_MSG_SIZE` | `104857600` | Max message body size (bytes) |
+| `RELAY_PRE_AUTH_MAX_MSG_SIZE` | `1048576` | Pre-registration message cap |
+| `RELAY_TLS_CERT` | — | TLS certificate path |
+| `RELAY_TLS_KEY` | — | TLS private key path |
+| `RELAY_TLS_MIN_VERSION` | `TLSv1_2` | Minimum TLS version |
+| `RELAY_TLS_CIPHERS` | — | OpenSSL cipher string |
 | `RELAY_LOG_LEVEL` | `INFO` | Log level |
 | `RELAY_LOG_FILE` | — | Log file path |
 | `RELAY_LOG_FORMAT` | `text` | Log format (`text` or `json`) |

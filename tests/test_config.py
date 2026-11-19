@@ -138,3 +138,38 @@ class TestLoadConfig:
         assert d["server"]["port"] == 8474
         assert d["admin"]["enabled"] is True
         assert d["logging"]["format"] == "text"
+
+
+class TestTlsAndSizeConfig:
+    """Regression: nuove chiavi tls_min_version / pre_auth_max_message_size."""
+
+    def test_defaults(self) -> None:
+        c = Config()
+        assert c.server.tls_min_version == "TLSv1_2"
+        assert c.server.tls_ciphers == ""
+        assert c.relay.pre_auth_max_message_size == 1024 * 1024
+
+    def test_yaml_roundtrip(self) -> None:
+        data = {
+            "server": {"tls_min_version": "TLSv1_3", "tls_ciphers": "ECDHE-RSA-AES256-GCM-SHA384"},
+            "relay": {"max_message_size": 8388608, "pre_auth_max_message_size": 65536},
+        }
+        from relay_server.config import _dict_to_config
+
+        c = _dict_to_config(data)
+        assert c.server.tls_min_version == "TLSv1_3"
+        assert c.server.tls_ciphers == "ECDHE-RSA-AES256-GCM-SHA384"
+        assert c.relay.max_message_size == 8388608
+        assert c.relay.pre_auth_max_message_size == 65536
+        # merge()/_to_dict() devono preservarle
+        assert c.merge({}).server.tls_min_version == "TLSv1_3"
+        assert c.merge({}).relay.pre_auth_max_message_size == 65536
+
+    def test_env_overrides(self, monkeypatch, tmp_path) -> None:
+        cfg = tmp_path / "relay.yaml"
+        cfg.write_text(yaml.safe_dump({"server": {"port": 8474}}))
+        monkeypatch.setenv("RELAY_TLS_MIN_VERSION", "TLSv1_3")
+        monkeypatch.setenv("RELAY_PRE_AUTH_MAX_MSG_SIZE", "131072")
+        c = load_config(str(cfg))
+        assert c.server.tls_min_version == "TLSv1_3"
+        assert c.relay.pre_auth_max_message_size == 131072

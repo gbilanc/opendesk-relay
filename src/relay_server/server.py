@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -46,6 +47,9 @@ class RelayPeer:
     authenticated: bool = False
     paired_peer_id: str | None = None
     address: str = ""
+    #: True once the peer has sent RELAY_REGISTER. Until then a stricter
+    #: message-size limit applies.
+    registered: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +100,17 @@ class RelayServer:
         # TLS support
         self._tls_context: Any = None
 
+        # Web dashboard (uvicorn) — tenuto per lo shutdown ordinato
+        self._web_server: Any = None
+
+        # Message-size limits (relay.max_message_size was previously ignored:
+        # protocol.from_reader compared against a hardcoded module constant).
+        self._max_message_size: int = self.config.relay.max_message_size
+        self._pre_auth_max_message_size: int = min(
+            self.config.relay.pre_auth_max_message_size,
+            self.config.relay.max_message_size,
+        )
+
     @property
     def auth(self) -> RelayAuth:
         """Return the authentication manager."""
@@ -110,15 +125,11 @@ class RelayServer:
         alongside the relay server.
         """
         # TLS support
-        tls_cert = self.config.server.tls_cert
-        tls_key = self.config.server.tls_key
-        ssl_ctx = None
-        if tls_cert and tls_key:
-            import ssl
-            ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ssl_ctx.load_cert_chain(tls_cert, tls_key)
+        ssl_ctx = self._build_tls_context()
+        if ssl_ctx is not None:
             self._tls_context = ssl_ctx
-            logger.info("TLS enabled (cert=%s)", tls_cert)
+            logger.info("TLS enabled (cert=%s, min_version=%s)",
+                        self.config.server.tls_cert, self._tls_min_version_name())
 
         self._server = await asyncio.start_server(
             self._handle_client,
@@ -139,11 +150,79 @@ class RelayServer:
         # Start web dashboard if configured
         if self.config.admin.enabled and self.web_app:
             from relay_server.web.app import run_web_server
-            await run_web_server(self, self.config)
+            self._web_server = await run_web_server(self, self.config)
 
         # Keep the server running
         async with self._server:
             await self._server.serve_forever()
+
+    # ── TLS helpers ────────────────────────────────
+
+    _TLS_VERSIONS = ("TLSv1_2", "TLSv1_3")
+
+    def _tls_min_version_name(self) -> str:
+        return self.config.server.tls_min_version
+
+    def _build_tls_context(self) -> Any:
+        """Build the server SSLContext, or ``None`` when TLS is disabled.
+
+        The minimum accepted version is taken from ``server.tls_min_version``
+        instead of relying on the OpenSSL build default.
+        """
+        tls_cert = self.config.server.tls_cert
+        tls_key = self.config.server.tls_key
+        if not (tls_cert and tls_key):
+            return None
+
+        import ssl
+
+        min_name = (self.config.server.tls_min_version or "TLSv1_2").strip()
+        if min_name not in self._TLS_VERSIONS:
+            raise ValueError(
+                f"server.tls_min_version must be one of {self._TLS_VERSIONS}, "
+                f"got {min_name!r}"
+            )
+
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.minimum_version = (
+            ssl.TLSVersion.TLSv1_2 if min_name == "TLSv1_2" else ssl.TLSVersion.TLSv1_3
+        )
+        if self.config.server.tls_ciphers:
+            ctx.set_ciphers(self.config.server.tls_ciphers)
+        ctx.load_cert_chain(tls_cert, tls_key)
+        return ctx
+
+    async def reload_tls(self) -> bool:
+        """Reload the certificate without dropping the listener.
+
+        ``SSLContext.load_cert_chain()`` swaps the certificate on the live
+        context, so new handshakes use the renewed certificate while existing
+        connections keep running. No process restart required.
+
+        Returns
+        -------
+        bool
+            ``True`` if the certificate was reloaded.
+        """
+        if self._tls_context is None:
+            logger.info("reload_tls: TLS non attivo, nulla da ricaricare")
+            return False
+
+        tls_cert = self.config.server.tls_cert
+        tls_key = self.config.server.tls_key
+        if not (tls_cert and tls_key):
+            logger.warning("reload_tls: tls_cert/tls_key non configurati")
+            return False
+
+        try:
+            self._tls_context.load_cert_chain(tls_cert, tls_key)
+        except Exception as exc:  # noqa: BLE001
+            # Keep serving with the old certificate rather than crashing.
+            logger.error("reload_tls: impossibile ricaricare %s: %s", tls_cert, exc)
+            return False
+
+        logger.info("TLS certificate reloaded from %s", tls_cert)
+        return True
 
     async def stop(self) -> None:
         """Stop the relay server and disconnect all peers."""
@@ -158,6 +237,17 @@ class RelayServer:
         self._peers.clear()
         self._sessions.clear()
         self._devices.clear()
+
+        # Ferma prima la dashboard: uvicorn deve chiudere il lifespan in modo
+        # pulito, altrimenti alla cancellazione del task stampa un traceback.
+        if self._web_server is not None:
+            with contextlib.suppress(Exception):
+                self._web_server.should_exit = True
+            serve_task = getattr(self._web_server, "serve_task", None)
+            if serve_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await asyncio.wait_for(serve_task, timeout=5)
+            self._web_server = None
 
         if self._server:
             self._server.close()
@@ -215,7 +305,18 @@ class RelayServer:
     async def _peer_loop(self, peer: RelayPeer) -> None:
         """Main loop for an individual peer."""
         while True:
-            msg = await Message.from_reader(peer.reader)
+            # Until the peer registers, enforce the stricter limit. This does
+            # not prevent memory growth on its own (registration carries no
+            # credentials) but it does stop unregistered sockets from parking
+            # megabyte-sized frames, and combined with the incremental read in
+            # Message.from_reader it removes the "declare 100 MB, allocate
+            # 100 MB" amplification entirely.
+            max_size = (
+                self._max_message_size
+                if peer.registered
+                else self._pre_auth_max_message_size
+            )
+            msg = await Message.from_reader(peer.reader, max_size=max_size)
             peer.last_activity = time.time()
             # Handle both MessageType enum and raw int types
             type_name = getattr(msg.type, 'name', str(msg.type))
@@ -368,6 +469,9 @@ class RelayServer:
         2. Session ID present → join or create session
         3. Neither → auto-generate new session (legacy)
         """
+        # Registration received: lift the stricter pre-registration frame cap.
+        peer.registered = True
+
         device_id = payload.get("device_id", "")
         device_name = payload.get("device_name", "")
         if device_id:

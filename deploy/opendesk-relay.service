@@ -21,6 +21,17 @@ ExecStart=relay-server --config /etc/opendesk-relay/relay-config.yaml
 Restart=on-failure
 RestartSec=5
 
+# Reload del certificato TLS senza restart: il server gestisce SIGHUP
+# ricaricando la catena sul SSLContext attivo (nessuna connessione persa).
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Limiti risorse: un frame puo' dichiarare fino a relay.max_message_size byte,
+# quindi un tetto di memoria evita che N connessioni concorrenti portino giu'
+# la macchina (il processo viene terminato e riavviato da Restart=).
+MemoryHigh=768M
+MemoryMax=1G
+TasksMax=256
+
 # Hardening
 NoNewPrivileges=true
 PrivateTmp=true

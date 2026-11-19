@@ -30,7 +30,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _PROTOCOL_VERSION = 1
-_MAX_MESSAGE_SIZE = 100 * 1024 * 1024  # 100 MB
+
+#: Hard default cap for a single message body (100 MB).
+#: Kept as a module default so ``Message.from_reader()`` stays usable on its
+#: own (tests, clients); the server passes ``relay.max_message_size``
+#: explicitly for every read.
+MAX_MESSAGE_SIZE = 100 * 1024 * 1024  # 100 MB
+
+#: Backwards-compatible private alias.
+_MAX_MESSAGE_SIZE = MAX_MESSAGE_SIZE
+
+#: Maximum number of bytes pulled from the socket per ``read()`` while
+#: assembling a body. Bounds peak allocation growth per iteration.
+_READ_CHUNK_SIZE = 64 * 1024
+
 _HEADER_FORMAT = "!I"  # 4 bytes unsigned int (network byte order)
 _HEADER_SIZE = struct.calcsize(_HEADER_FORMAT)
 
@@ -143,13 +156,27 @@ class Message:
         -------
         Message
         """
+        if len(data) < _HEADER_SIZE:
+            raise ValueError(
+                f"Truncated message: {len(data)} bytes < header {_HEADER_SIZE}"
+            )
+
         body_len = struct.unpack(_HEADER_FORMAT, data[:_HEADER_SIZE])[0]
+        if len(data) < _HEADER_SIZE + body_len:
+            raise ValueError(
+                f"Truncated message: declared {body_len} body bytes, "
+                f"got {len(data) - _HEADER_SIZE}"
+            )
         body = data[_HEADER_SIZE : _HEADER_SIZE + body_len]
+        if not body:
+            raise ValueError("Empty message body")
         obj = msgpack.unpackb(body)
         
         # Preserve the raw type value even if not in our enum.
         # The receiving peer has the full MessageType and can decode
         # it correctly.  We just forward it blindly.
+        if not isinstance(obj, dict) or "t" not in obj:
+            raise ValueError("Malformed message: missing 't' field")
         raw_type = obj["t"]
         try:
             msg_type = MessageType(raw_type)
@@ -166,8 +193,34 @@ class Message:
         )
 
     @classmethod
-    async def from_reader(cls, reader: Any) -> Message:  # noqa: ANN401
-        """Read and decode a message from an asyncio StreamReader."""
+    async def from_reader(
+        cls,
+        reader: Any,  # noqa: ANN401
+        max_size: int | None = None,
+    ) -> Message:
+        """Read and decode a message from an asyncio StreamReader.
+
+        Parameters
+        ----------
+        reader
+            Source stream.
+        max_size
+            Maximum accepted body length in bytes. Defaults to
+            :data:`MAX_MESSAGE_SIZE`. The server passes the configured
+            ``relay.max_message_size`` (or the stricter pre-registration
+            limit) so that the value in the YAML file is actually enforced.
+
+        Notes
+        -----
+        The body is assembled incrementally with ``extend()``: memory grows
+        with the bytes actually received, never with the length declared in
+        the header. A peer that announces a huge frame but never sends it can
+        no longer make the server allocate the full buffer up front.
+        """
+        limit = MAX_MESSAGE_SIZE if max_size is None else max_size
+        if limit <= 0:
+            raise ValueError(f"Invalid max_size: {limit}")
+
         header_data = b""
         while len(header_data) < _HEADER_SIZE:
             chunk = await reader.read(_HEADER_SIZE - len(header_data))
@@ -181,26 +234,25 @@ class Message:
             header_data += chunk
 
         body_len = struct.unpack(_HEADER_FORMAT, header_data)[0]
-        if body_len > _MAX_MESSAGE_SIZE:
+        if body_len > limit:
             logger.warning(
                 "from_reader: message too large: %d bytes (max %d)",
-                body_len, _MAX_MESSAGE_SIZE,
+                body_len, limit,
             )
-            raise ValueError(f"Message too large: {body_len} bytes")
+            raise ValueError(f"Message too large: {body_len} bytes (max {limit})")
 
-        body_buf = bytearray(body_len)
-        bytes_read = 0
-        while bytes_read < body_len:
-            chunk = await reader.read(body_len - bytes_read)
+        body_buf = bytearray()
+        while len(body_buf) < body_len:
+            remaining = body_len - len(body_buf)
+            chunk = await reader.read(min(_READ_CHUNK_SIZE, remaining))
             if not chunk:
                 logger.debug(
                     "from_reader: got empty chunk while reading body "
                     "(had %d/%d bytes) — connection closed",
-                    bytes_read, body_len,
+                    len(body_buf), body_len,
                 )
                 raise ConnectionError("Connection closed while reading body")
-            body_buf[bytes_read : bytes_read + len(chunk)] = chunk
-            bytes_read += len(chunk)
+            body_buf.extend(chunk)
 
         wire_data = header_data + bytes(body_buf)
         msg = cls.decode(wire_data)

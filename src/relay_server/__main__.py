@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import logging
+import signal
 import sys
 
 from relay_server.config import Config, load_config
@@ -116,7 +118,51 @@ def main(argv: list[str] | None = None) -> None:
             web_app = create_web_app(server, config)
             server.web_app = web_app
 
-        await server.start()
+        # ── Signal handling ──
+        loop = asyncio.get_running_loop()
+        stop_event = asyncio.Event()
+        stop_requested = False
+
+        def _request_stop(signame: str) -> None:
+            nonlocal stop_requested
+            if stop_requested:
+                # uvicorn installa i propri handler sui medesimi segnali:
+                # senza questa guardia lo stop verrebbe loggato/eseguito
+                # due volte.
+                return
+            stop_requested = True
+            logger.info("Received %s, shutting down", signame)
+            stop_event.set()
+
+        def _reload_tls() -> None:
+            logger.info("Received SIGHUP, reloading TLS certificate")
+            asyncio.create_task(server.reload_tls())
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, _request_stop, sig.name)
+            except NotImplementedError:  # pragma: no cover - non-POSIX
+                pass
+        try:
+            # systemctl reload / kill -HUP → swap certificate without restart
+            loop.add_signal_handler(signal.SIGHUP, _reload_tls)
+        except (AttributeError, NotImplementedError):  # pragma: no cover
+            pass
+
+        server_task = asyncio.create_task(server.start(), name="relay-server")
+        stop_task = asyncio.create_task(stop_event.wait(), name="relay-stop")
+        try:
+            await asyncio.wait(
+                {server_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            stop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await server.stop()
+            server_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await server_task
 
     try:
         asyncio.run(_run())

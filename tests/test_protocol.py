@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import struct
 
+import msgpack
 import pytest
 
 from relay_server.protocol import Message, MessageType, _HEADER_SIZE, _MAX_MESSAGE_SIZE
@@ -94,3 +96,62 @@ class TestMessageFactories:
         msg = Message.relay_device_list(devices)
         assert msg.type == MessageType.RELAY_DEVICE_LIST
         assert msg.payload["devices"] == devices
+
+
+class TestConfigurableMaxSize:
+    """Regression: relay.max_message_size era ignorato (_MAX_MESSAGE_SIZE hardcoded)."""
+
+    async def _reader_with(self, body_len: int, body: bytes = b"", pad: int = 0):
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader(loop=loop)
+        reader.feed_data(struct.pack("!I", body_len) + body + b"\x00" * pad)
+        reader.feed_eof()
+        return reader
+
+    def test_custom_limit_is_honoured(self) -> None:
+        body = msgpack.packb({"t": MessageType.PING.value, "p": {}})
+        reader = asyncio.run(self._reader_with(len(body), body))
+
+        # 1 byte below the real size => rejected by the caller-supplied limit
+        with pytest.raises(ValueError, match="Message too large"):
+            asyncio.run(Message.from_reader(reader, max_size=len(body) - 1))
+
+    def test_default_limit_allows_normal_message(self) -> None:
+        payload = {"data": "x" * 5000}
+        original = Message(MessageType.RELAY_ROUTE, payload)
+        wire = original.encode()
+        body = wire[_HEADER_SIZE:]
+        reader = asyncio.run(self._reader_with(len(body), body))
+        decoded = asyncio.run(Message.from_reader(reader, max_size=1 << 20))
+        assert decoded.payload["data"] == payload["data"]
+
+    def test_invalid_limit_rejected(self) -> None:
+        reader = asyncio.run(self._reader_with(0))
+        with pytest.raises(ValueError, match="Invalid max_size"):
+            asyncio.run(Message.from_reader(reader, max_size=0))
+
+
+class TestIncrementalAllocation:
+    """Regression: buffer allocato fino a body_len PRIMA di ricevere i dati."""
+
+    def test_announced_size_does_not_allocate(self) -> None:
+        import tracemalloc
+
+        async def scenario() -> None:
+            loop = asyncio.get_running_loop()
+            reader = asyncio.StreamReader(loop=loop)
+            # Annuncia 50 MB e non invia nulla: nessuna allocazione deve avvenire.
+            reader.feed_data(struct.pack("!I", 50 * 1024 * 1024))
+            reader.feed_eof()
+            with pytest.raises(ConnectionError):
+                await Message.from_reader(reader, max_size=64 * 1024 * 1024)
+
+        tracemalloc.start()
+        try:
+            asyncio.run(scenario())
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        # Vecchia implementazione: bytearray(50 MB) => peak >= 50 MB.
+        assert peak < 2 * 1024 * 1024, f"peak allocation {peak} bytes"

@@ -128,7 +128,10 @@ async def run_web_server(server: RelayServer, config: Config) -> uvicorn.Server:
         config.admin.web_port,
     )
 
-    # Start uvicorn in a separate task
-    asyncio.create_task(uvicorn_server.serve())
+    # Start uvicorn in a separate task; keep the handle so RelayServer.stop()
+    # can ask for a graceful shutdown (should_exit + await) instead of
+    # cancelling the task, which makes the lifespan emit a CancelledError
+    # traceback at loop teardown.
+    uvicorn_server.serve_task = asyncio.create_task(uvicorn_server.serve())
 
     return uvicorn_server

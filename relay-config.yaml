@@ -8,6 +8,8 @@ server:
   port: 8474                # TCP port for relay connections
   tls_cert: ""              # Path to TLS certificate (empty = no TLS)
   tls_key: ""               # Path to TLS private key
+  tls_min_version: "TLSv1_2"  # Minimum accepted TLS version: TLSv1_2 | TLSv1_3
+  tls_ciphers: ""           # Optional OpenSSL cipher string (empty = defaults)
 
 admin:
   enabled: true             # Enable web dashboard
@@ -25,7 +27,8 @@ auth:
 relay:
   ping_interval: 30         # Seconds between PING messages
   peer_timeout: 120         # Seconds without activity before disconnect
-  max_message_size: 104857600  # Max message size in bytes (100 MB)
+  max_message_size: 104857600  # Max message body size in bytes (100 MB)
+  pre_auth_max_message_size: 1048576  # Stricter cap until RELAY_REGISTER (1 MB)
 
 logging:
   level: "INFO"             # Log level: DEBUG, INFO, WARNING, ERROR

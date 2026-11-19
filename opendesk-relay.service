@@ -16,6 +16,8 @@ ExecStart=/home/giampaolo/.local/bin/uv run --directory /home/giampaolo/Codium/o
 # === Configuration ===
 Restart=on-failure
 RestartSec=5
+# Reload del certificato TLS senza restart (il server gestisce SIGHUP)
+ExecReload=/bin/kill -HUP $MAINPID
 User=giampaolo
 Group=giampaolo
 
@@ -25,6 +27,13 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 ReadWritePaths=/home/giampaolo/.opendesk
+
+# Limiti risorse: ogni frame puo' dichiarare fino a max_message_size byte,
+# quindi un tetto di memoria evita che N connessioni concorrenti portino
+# giu' la macchina (il processo viene terminato e riavviato).
+MemoryHigh=768M
+MemoryMax=1G
+TasksMax=256
 
 [Install]
 WantedBy=multi-user.target

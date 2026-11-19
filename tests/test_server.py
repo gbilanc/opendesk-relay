@@ -413,3 +413,61 @@ async def _drain_messages(reader, count: int) -> list[Message]:
         except asyncio.TimeoutError:
             break
     return msgs
+
+
+class TestMessageSizeLimits:
+    """Regression: relay.max_message_size ignorato e limite pre-registrazione."""
+
+    def test_limits_are_cached_and_clamped(self) -> None:
+        cfg = Config()
+        cfg.relay.max_message_size = 4096
+        cfg.relay.pre_auth_max_message_size = 1 << 20  # > max => clamped
+        srv = RelayServer(config=cfg)
+        assert srv._max_message_size == 4096
+        assert srv._pre_auth_max_message_size == 4096
+
+    @pytest.mark.asyncio
+    async def test_pre_auth_limit_rejects_oversized_frame(self) -> None:
+        cfg = Config()
+        cfg.server.host = "127.0.0.1"
+        cfg.server.port = 0
+        cfg.admin.enabled = False
+        cfg.auth.enabled = False
+        cfg.relay.max_message_size = 1024 * 1024
+        cfg.relay.pre_auth_max_message_size = 512
+        srv = RelayServer(config=cfg)
+
+        task = asyncio.create_task(srv.start())
+        await asyncio.sleep(0.4)
+        port = srv._server.sockets[0].getsockname()[1]
+
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", port)
+            # Frame da ~4 KB dichiarato e inviato SENZA registrazione.
+            big = Message(MessageType.RELAY_ROUTE, {"inner_type": 0x70,
+                                                    "inner_payload": {"d": "x" * 4096}})
+            Message.write(writer, big)
+            await writer.drain()
+
+            # Il server deve chiudere la connessione.
+            data = await asyncio.wait_for(reader.read(1), timeout=3.0)
+            assert data == b""
+            writer.close()
+        finally:
+            await srv.stop()
+            task.cancel()
+            with pytest.raises((asyncio.CancelledError, asyncio.TimeoutError)):
+                await task
+
+    def test_reload_tls_without_context(self) -> None:
+        srv = RelayServer(config=Config())
+        assert asyncio.run(srv.reload_tls()) is False
+
+    def test_invalid_tls_min_version_raises(self) -> None:
+        cfg = Config()
+        cfg.server.tls_cert = "/tmp/nonexistent.pem"
+        cfg.server.tls_key = "/tmp/nonexistent.key"
+        cfg.server.tls_min_version = "SSLv3"
+        srv = RelayServer(config=cfg)
+        with pytest.raises(ValueError, match="tls_min_version"):
+            srv._build_tls_context()

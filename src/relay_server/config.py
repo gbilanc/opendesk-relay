@@ -44,6 +44,12 @@ class ServerConfig:
     port: int = 8474
     tls_cert: str = ""
     tls_key: str = ""
+    #: Minimum accepted TLS version: "TLSv1_2" or "TLSv1_3".
+    #: Guards against the OpenSSL build default being more permissive than
+    #: expected instead of relying on it silently.
+    tls_min_version: str = "TLSv1_2"
+    #: Optional OpenSSL cipher string. Empty = OpenSSL/Python defaults.
+    tls_ciphers: str = ""
 
 
 @dataclass
@@ -73,7 +79,12 @@ class RelayConfig:
 
     ping_interval: int = 30
     peer_timeout: int = 120
+    #: Hard cap for a single message body, enforced by ``Message.from_reader``.
     max_message_size: int = 100 * 1024 * 1024  # 100 MB
+    #: Stricter cap applied until the peer has sent RELAY_REGISTER.
+    #: Best-effort DoS hardening only: registration carries no credentials,
+    #: so this is not a security boundary. Pair it with MemoryMax/TasksMax.
+    pre_auth_max_message_size: int = 1024 * 1024  # 1 MB
 
 
 @dataclass
@@ -115,7 +126,9 @@ class Config:
         """Convert the entire config to a nested dict."""
         return {
             "server": {"host": self.server.host, "port": self.server.port,
-                        "tls_cert": self.server.tls_cert, "tls_key": self.server.tls_key},
+                        "tls_cert": self.server.tls_cert, "tls_key": self.server.tls_key,
+                        "tls_min_version": self.server.tls_min_version,
+                        "tls_ciphers": self.server.tls_ciphers},
             "admin": {"enabled": self.admin.enabled, "web_host": self.admin.web_host,
                        "web_port": self.admin.web_port, "username": self.admin.username,
                        "password_hash": self.admin.password_hash,
@@ -125,7 +138,8 @@ class Config:
                       "blacklist_ips": self.auth.blacklist_ips},
             "relay": {"ping_interval": self.relay.ping_interval,
                        "peer_timeout": self.relay.peer_timeout,
-                       "max_message_size": self.relay.max_message_size},
+                       "max_message_size": self.relay.max_message_size,
+                       "pre_auth_max_message_size": self.relay.pre_auth_max_message_size},
             "logging": {"level": self.logging.level, "file": self.logging.file,
                          "format": self.logging.format, "max_size": self.logging.max_size,
                          "backup_count": self.logging.backup_count},
@@ -241,6 +255,10 @@ def _load_env() -> dict[str, Any]:
         config.setdefault("server", {})["tls_cert"] = env["RELAY_TLS_CERT"]
     if "RELAY_TLS_KEY" in env:
         config.setdefault("server", {})["tls_key"] = env["RELAY_TLS_KEY"]
+    if "RELAY_TLS_MIN_VERSION" in env:
+        config.setdefault("server", {})["tls_min_version"] = env["RELAY_TLS_MIN_VERSION"]
+    if "RELAY_TLS_CIPHERS" in env:
+        config.setdefault("server", {})["tls_ciphers"] = env["RELAY_TLS_CIPHERS"]
 
     # Admin dashboard
     if "RELAY_ADMIN_ENABLED" in env:
@@ -275,6 +293,10 @@ def _load_env() -> dict[str, Any]:
         config.setdefault("relay", {})["peer_timeout"] = int(env["RELAY_PEER_TIMEOUT"])
     if "RELAY_MAX_MSG_SIZE" in env:
         config.setdefault("relay", {})["max_message_size"] = int(env["RELAY_MAX_MSG_SIZE"])
+    if "RELAY_PRE_AUTH_MAX_MSG_SIZE" in env:
+        config.setdefault("relay", {})["pre_auth_max_message_size"] = int(
+            env["RELAY_PRE_AUTH_MAX_MSG_SIZE"]
+        )
 
     # Logging
     if "RELAY_LOG_LEVEL" in env:
@@ -346,6 +368,8 @@ def _dict_to_config(data: dict[str, Any]) -> Config:
             port=int(server_data.get("port", 8474)),
             tls_cert=str(server_data.get("tls_cert", "")),
             tls_key=str(server_data.get("tls_key", "")),
+            tls_min_version=str(server_data.get("tls_min_version", "TLSv1_2")),
+            tls_ciphers=str(server_data.get("tls_ciphers", "")),
         ),
         admin=AdminConfig(
             enabled=bool(admin_data.get("enabled", True)),
@@ -364,6 +388,9 @@ def _dict_to_config(data: dict[str, Any]) -> Config:
             ping_interval=int(relay_data.get("ping_interval", 30)),
             peer_timeout=int(relay_data.get("peer_timeout", 120)),
             max_message_size=int(relay_data.get("max_message_size", 100 * 1024 * 1024)),
+            pre_auth_max_message_size=int(
+                relay_data.get("pre_auth_max_message_size", 1024 * 1024)
+            ),
         ),
         logging=LoggingConfig(
             level=str(log_data.get("level", "INFO")),
