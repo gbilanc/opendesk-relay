@@ -6,12 +6,17 @@ Esegue sull'host remoto la sequenza reale di handshake:
   RELAY_REGISTER (device) -> attende conferma/sessione
   RELAY_DEVICE_LIST -> (il server non risponde se non accoppiato: non bloccante)
 
-Uso: deploy/probe-relay.py [host] [port]
+Uso: deploy/probe-relay.py [--tls] [--insecure] [host] [port]
      es. deploy/probe-relay.py relay.gibisoft.net 8474
+         deploy/probe-relay.py --tls relay.gibisoft.net 8474
+
+--tls       la porta parla TLS (server.tls_cert/tls_key valorizzati)
+--insecure  non verificare il certificato (solo per self-signed)
 
 Exit: 0 = handshake ok, 1 = il relay non risponde correttamente.
 """
 import asyncio
+import ssl
 import struct
 import sys
 import time
@@ -38,11 +43,18 @@ async def read_msg(reader, timeout=6.0):
     return m.get("t"), m.get("p")
 
 
-async def main(host, port):
+async def main(host, port, use_tls=False, insecure=False):
     t0 = time.time()
-    reader, writer = await asyncio.open_connection(host, port)
+    ssl_ctx = None
+    if use_tls:
+        ssl_ctx = ssl.create_default_context()
+        if insecure:
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+    reader, writer = await asyncio.open_connection(host, port, ssl=ssl_ctx)
     peer = writer.get_extra_info("peername")
-    print(f"✓ TCP connesso a {host}:{port} (peer visto dal server: {peer})")
+    proto = "TLS" if use_tls else "TCP"
+    print(f"✓ {proto} connesso a {host}:{port} (peer visto dal server: {peer})")
 
     ok = True
 
@@ -92,6 +104,14 @@ async def main(host, port):
 
 
 if __name__ == "__main__":
-    h = sys.argv[1] if len(sys.argv) > 1 else "relay.gibisoft.net"
-    p = int(sys.argv[2]) if len(sys.argv) > 2 else 8474
-    raise SystemExit(asyncio.run(main(h, p)))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    h = args[0] if len(args) > 0 else "relay.gibisoft.net"
+    p = int(args[1]) if len(args) > 1 else 8474
+    # --tls: il relay ha TLS abilitato (la porta parla TLS, non TCP in chiaro).
+    # --insecure: non verificare il certificato (solo per test con self-signed).
+    raise SystemExit(
+        asyncio.run(
+            main(h, p, use_tls="--tls" in flags, insecure="--insecure" in flags)
+        )
+    )

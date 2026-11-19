@@ -50,6 +50,9 @@ class RelayPeer:
     #: True once the peer has sent RELAY_REGISTER. Until then a stricter
     #: message-size limit applies.
     registered: bool = False
+    #: Number of complete frames received; used to tell "idle client" apart
+    #: from "client that never got its bytes through" (e.g. TLS mismatch).
+    messages_received: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +292,21 @@ class RelayServer:
             logger.debug("[%s] Entering _peer_loop", peer_id)
             await self._peer_loop(peer)
             logger.debug("[%s] _peer_loop exited normally", peer_id)
-        except (ConnectionError, asyncio.IncompleteReadError) as e:
+        except asyncio.IncompleteReadError:
+            # A peer that closes before sending a single complete frame is the
+            # typical signature of a plaintext client hitting a TLS listener:
+            # the handshake fails, the socket is torn down, no frame is read.
+            if peer.messages_received == 0 and self._tls_context is not None:
+                logger.warning(
+                    "[%s] %s closed before RELAY_REGISTER while TLS is enabled "
+                    "on this port — the client probably speaks plain TCP "
+                    "(disable server.tls_cert/tls_key or upgrade the client)",
+                    peer_id,
+                    addr_str,
+                )
+            else:
+                logger.debug("[%s] Peer disconnected (IncompleteReadError)", peer_id)
+        except ConnectionError as e:
             logger.debug("[%s] Peer disconnected (ConnectionError): %s", peer_id, e)
         except asyncio.CancelledError:
             logger.debug("[%s] Peer loop cancelled", peer_id)
@@ -317,6 +334,7 @@ class RelayServer:
                 else self._pre_auth_max_message_size
             )
             msg = await Message.from_reader(peer.reader, max_size=max_size)
+            peer.messages_received += 1
             peer.last_activity = time.time()
             # Handle both MessageType enum and raw int types
             type_name = getattr(msg.type, 'name', str(msg.type))

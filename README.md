@@ -120,9 +120,31 @@ PING/PONG, `RELAY_REGISTER`, assegnazione sessione):
 ```bash
 ./deploy/probe-relay.py relay.gibisoft.net 8474     # usa <venv>/bin/python se manca msgpack
 ./deploy/probe-relay.py 130.78.81.63 8474           # bypassa il DNS/hosts locale
+./deploy/probe-relay.py --tls relay.gibisoft.net 8474   # se sul relay è attivo TLS
 ```
 
 Exit `0` = handshake ok, `1` = il relay non risponde correttamente.
+
+#### TLS sul protocollo relay
+
+Se `server.tls_cert`/`server.tls_key` sono valorizzati, la porta 8474 parla **solo** TLS:
+un client che apre un TCP in chiaro non arriva nemmeno a `RELAY_REGISTER`, la connessione
+muore durante l'handshake e nel log **non compare** alcuna riga `Peer connected`.
+I client OpenDesk v2.1.0 parlano TCP in chiaro, quindi con TLS attivo non riescono a
+comunicare: tenere `tls_cert`/`tls_key` vuoti finché i client non supportano TLS.
+
+Diagnostica rapida:
+
+```bash
+# la porta parla TLS?
+openssl s_client -connect relay.gibisoft.net:8474 -servername relay.gibisoft.net -brief </dev/null
+
+# il client OpenDesk viene servito?
+./deploy/probe-relay.py relay.gibisoft.net 8474
+```
+
+Se `probe-relay.py` senza `--tls` va in timeout/reset ma con `--tls` funziona, il relay
+e' in TLS e i client no. Se il contrario, il relay e' in chiaro e i client usano TLS.
 
 Nota: `curl http://<host>:8474/` restituisce *Empty reply from server* con exit 52 — è il
 comportamento atteso, la porta parla un protocollo binario e non HTTP.
