@@ -50,6 +50,13 @@ class ServerConfig:
     tls_min_version: str = "TLSv1_2"
     #: Optional OpenSSL cipher string. Empty = OpenSSL/Python defaults.
     tls_ciphers: str = ""
+    #: Opportunistic TLS: the server peeks the first bytes of each connection
+    #: and upgrades to TLS only if the peer speaks a TLS ClientHello. Plaintext
+    #: clients (OpenDesk <= v2.1.0) keep working; TLS-capable clients get an
+    #: encrypted channel. Set to False (default) to enforce TLS-only whenever
+    #: tls_cert/tls_key are configured (server rejects plaintext). Use False
+    #: once every client speaks TLS, to close the cleartext window entirely.
+    tls_auto_detect: bool = False
 
 
 @dataclass
@@ -128,7 +135,8 @@ class Config:
             "server": {"host": self.server.host, "port": self.server.port,
                         "tls_cert": self.server.tls_cert, "tls_key": self.server.tls_key,
                         "tls_min_version": self.server.tls_min_version,
-                        "tls_ciphers": self.server.tls_ciphers},
+                        "tls_ciphers": self.server.tls_ciphers,
+                        "tls_auto_detect": self.server.tls_auto_detect},
             "admin": {"enabled": self.admin.enabled, "web_host": self.admin.web_host,
                        "web_port": self.admin.web_port, "username": self.admin.username,
                        "password_hash": self.admin.password_hash,
@@ -370,6 +378,7 @@ def _dict_to_config(data: dict[str, Any]) -> Config:
             tls_key=str(server_data.get("tls_key", "")),
             tls_min_version=str(server_data.get("tls_min_version", "TLSv1_2")),
             tls_ciphers=str(server_data.get("tls_ciphers", "")),
+            tls_auto_detect=bool(server_data.get("tls_auto_detect", False)),
         ),
         admin=AdminConfig(
             enabled=bool(admin_data.get("enabled", True)),

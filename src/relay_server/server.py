@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import socket
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -102,6 +103,8 @@ class RelayServer:
 
         # TLS support
         self._tls_context: Any = None
+        # Peers upgraded to TLS in auto-detect mode (for metrics only)
+        self._tls_peers: set = set()
 
         # Web dashboard (uvicorn) — tenuto per lo shutdown ordinato
         self._web_server: Any = None
@@ -129,16 +132,23 @@ class RelayServer:
         """
         # TLS support
         ssl_ctx = self._build_tls_context()
+        auto_tls = bool(getattr(self.config.server, "tls_auto_detect", False))
         if ssl_ctx is not None:
             self._tls_context = ssl_ctx
-            logger.info("TLS enabled (cert=%s, min_version=%s)",
-                        self.config.server.tls_cert, self._tls_min_version_name())
+            logger.info(
+                "TLS enabled (cert=%s, min_version=%s, mode=%s)",
+                self.config.server.tls_cert,
+                self._tls_min_version_name(),
+                "auto-detect" if auto_tls else "tls-only",
+            )
 
         self._server = await asyncio.start_server(
             self._handle_client,
             host=self.config.server.host,
             port=self.config.server.port,
-            ssl=ssl_ctx,
+            # In auto-detect mode the TLS upgrade happens per-connection inside
+            # _handle_client, so the listener itself must stay plaintext.
+            ssl=None if auto_tls else ssl_ctx,
         )
         addr = self._server.sockets[0].getsockname()
         proto = "TLS" if ssl_ctx else "TCP"
@@ -259,6 +269,65 @@ class RelayServer:
 
     # ── client handling ─────────────────────────────────────────────
 
+    async def _maybe_upgrade_tls(
+        self, writer: asyncio.StreamWriter, addr_str: str
+    ) -> bool:
+        """Peek the first bytes and upgrade to TLS if the peer is a TLS client.
+
+        The transport is paused first so the event loop cannot consume the
+        ClientHello into the StreamReader (start_tls() would lose it). The peek
+        is done with MSG_PEEK on a *duplicated* fd, which shares the kernel
+        receive queue without touching the transport's socket: plaintext bytes
+        stay in place for legacy clients.
+        """
+        transport = writer.transport
+        sock = writer.get_extra_info("socket")
+        if sock is None or transport is None:
+            return False
+        transport.pause_reading()
+        loop = asyncio.get_running_loop()
+
+        def _peek() -> bytes:
+            dup = sock.dup()
+            dup.setblocking(True)
+            try:
+                deadline = time.monotonic() + 15
+                while True:
+                    try:
+                        return dup.recv(3, socket.MSG_PEEK)
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            return b""
+                        time.sleep(0.05)
+                    except OSError:
+                        return b""
+            finally:
+                dup.close()
+
+        try:
+            first = await asyncio.wait_for(
+                loop.run_in_executor(None, _peek), timeout=20
+            )
+        except Exception:
+            transport.resume_reading()
+            return False
+        if not first.startswith(b"\x16\x03"):
+            transport.resume_reading()
+            logger.debug("[%s] plaintext client (auto-detect TLS)", addr_str)
+            return False
+        try:
+            await asyncio.wait_for(
+                # server_side è dedotto automaticamente da StreamWriter
+                # (la connessione è stata accettata dal server)
+                writer.start_tls(self._tls_context), timeout=15
+            )
+        except Exception as e:
+            logger.warning("[%s] TLS handshake failed: %s", addr_str, e)
+            writer.close()
+            return False
+        logger.info("[%s] TLS upgraded (auto-detect)", addr_str)
+        return True
+
     async def _handle_client(
         self,
         reader: asyncio.StreamReader,
@@ -276,6 +345,16 @@ class RelayServer:
                 writer.close()
                 return
 
+        # Opportunistic TLS: if TLS is configured in auto-detect mode, peek
+        # the first bytes; a TLS ClientHello (0x16 0x03 …) triggers a server-side
+        # TLS handshake, anything else continues as plaintext (legacy clients).
+        if self._tls_context is not None and getattr(
+            self.config.server, "tls_auto_detect", False
+        ):
+            upgraded = await self._maybe_upgrade_tls(writer, addr_str)
+            if upgraded:
+                self._tls_peers.add(writer)
+
         peer_id = f"peer-{id(writer):x}"
         peer = RelayPeer(
             peer_id=peer_id,
@@ -284,7 +363,13 @@ class RelayServer:
             address=addr_str,
         )
         self._peers[peer_id] = peer
-        self.metrics.on_connection("tls" if self._tls_context else "tcp")
+        conn_kind = "tcp"
+        if self._tls_context is not None:
+            if not getattr(self.config.server, "tls_auto_detect", False):
+                conn_kind = "tls"  # tls-only: listener wrapped every connection
+            elif writer in self._tls_peers:
+                conn_kind = "tls"
+        self.metrics.on_connection(conn_kind)
 
         logger.info("Peer connected: %s from %s (total_peers=%d)", peer_id, addr_str, len(self._peers))
 
